@@ -1,18 +1,22 @@
-// Cadence service worker — lightweight offline support.
-// Hand-written (no build step) so it stays compatible with Next.js + Turbopack.
+// Cadence service worker — minimal, offline-fallback only.
+//
+// Deliberately does NOT cache app assets. Caching Next.js App Router output
+// (hashed chunks + RSC payloads) risks serving stale pieces from an old deploy
+// against fresh HTML, which breaks the page. So every request goes straight to
+// the network; we only step in to show a cached offline screen when a page
+// navigation fails because there's no connection.
 
-const CACHE = "cadence-v1";
+const CACHE = "cadence-v2";
 const OFFLINE_URL = "/offline";
 
-// Precache the offline fallback so navigations always have something to show.
+// Precache just the offline fallback page.
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.add(OFFLINE_URL)),
-  );
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.add(OFFLINE_URL)));
   self.skipWaiting();
 });
 
-// Drop old caches when the worker version changes.
+// Take control immediately and delete any caches from older worker versions
+// (this clears the previous asset cache that could serve stale content).
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
@@ -26,32 +30,13 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  if (request.method !== "GET") return;
+  // Only handle top-level page navigations; let everything else hit the
+  // network untouched.
+  if (request.method !== "GET" || request.mode !== "navigate") return;
 
-  // Page navigations: network-first, fall back to the cached offline screen.
-  if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request).catch(() =>
-        caches.match(OFFLINE_URL).then((res) => res ?? Response.error()),
-      ),
-    );
-    return;
-  }
-
-  // Static same-origin assets: stale-while-revalidate.
-  const url = new URL(request.url);
-  if (url.origin === self.location.origin) {
-    event.respondWith(
-      caches.open(CACHE).then(async (cache) => {
-        const cached = await cache.match(request);
-        const network = fetch(request)
-          .then((res) => {
-            if (res.ok) cache.put(request, res.clone());
-            return res;
-          })
-          .catch(() => cached);
-        return cached ?? network;
-      }),
-    );
-  }
+  event.respondWith(
+    fetch(request).catch(() =>
+      caches.match(OFFLINE_URL).then((res) => res ?? Response.error()),
+    ),
+  );
 });
