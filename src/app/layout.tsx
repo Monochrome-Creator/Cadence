@@ -4,6 +4,7 @@ import "./globals.css";
 import { MobileNav, Sidebar } from "@/components/sidebar";
 import { CloudSyncProvider } from "@/components/cloud-sync-provider";
 import { NotificationManager } from "@/components/notification-manager";
+import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,6 +25,14 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "Cadence",
   description: "Your productivity board, flashcards, and focus timer.",
+  appleWebApp: {
+    capable: true,
+    title: "Cadence",
+    statusBarStyle: "default",
+  },
+  icons: {
+    apple: "/icon-192.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -46,6 +55,7 @@ export default function RootLayout({
       <body className="flex min-h-full bg-[#fdfbf7] p-2 text-[#3a322a] md:p-3">
         <CloudSyncProvider />
         <NotificationManager />
+        <PwaInstallPrompt />
         <Sidebar />
         <main className="h-[calc(100vh-1rem)] flex-1 overflow-y-auto pb-24 md:h-[calc(100vh-1.5rem)] md:pb-0">
           {children}
