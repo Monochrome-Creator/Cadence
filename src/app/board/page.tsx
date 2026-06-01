@@ -590,7 +590,7 @@ function SortableTaskCard({
         )}
       >
         {/* Drag handle + expand chevron + focus + title */}
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-start gap-1.5 md:items-center">
           <button
             type="button"
             {...attributes}
@@ -652,7 +652,7 @@ function SortableTaskCard({
                 onChange={(e) => updateTask(task.id, { title: e.target.value })}
                 placeholder="Untitled task"
                 rows={1}
-                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-sm leading-snug font-medium break-words text-[#4a4036] outline-none transition-colors hover:border-[#e8e0d5] focus:border-[#a35d4d]"
+                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words text-[#4a4036] outline-none transition-colors hover:border-[#e8e0d5] focus:border-[#a35d4d] md:text-sm"
               />
 
               {task.subtasks.length > 0 && (
@@ -674,9 +674,11 @@ function SortableTaskCard({
           </div>
         </div>
 
-        {/* Secondary controls: a wrapped flex row on mobile; flattened into the
-            grid columns on desktop via display:contents (md:contents). */}
-        <div className="flex flex-wrap items-center gap-2 md:contents">
+        {/* Secondary controls: a tidy 2-column grid on mobile (Status | Priority,
+            full-width Category, Sessions | Actions); flattened into the desktop
+            grid columns via display:contents (md:contents), so these base grid
+            classes never affect the desktop layout. */}
+        <div className="grid grid-cols-2 items-center gap-2 md:contents">
           {/* Status pill */}
           <Select
           value={task.status}
@@ -727,7 +729,7 @@ function SortableTaskCard({
           placeholder="Category"
           aria-label="Task category"
           className={cn(
-            "h-auto w-28 min-w-0 rounded-full border-0 px-3 py-1 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[#b3a692] focus:ring-2 focus:ring-[#a35d4d]/25 md:w-full",
+            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-1 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[#b3a692] focus:ring-2 focus:ring-[#a35d4d]/25 md:col-auto md:w-full",
             theme.pill
           )}
         />
