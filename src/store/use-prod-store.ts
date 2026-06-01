@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { addDays, addMonths, addWeeks, format, isValid, parseISO } from "date-fns";
 
 import {
@@ -339,7 +340,9 @@ function pushCategoriesIfCloud(getState: () => ProdState): void {
   void pushCategories(getState().categories);
 }
 
-export const useProdStore = create<ProdState>((set, get) => ({
+export const useProdStore = create<ProdState>()(
+  persist(
+    (set, get) => ({
   tasks: initialTasks,
   categories: initialCategories,
   flashcards: [],
@@ -738,4 +741,22 @@ export const useProdStore = create<ProdState>((set, get) => ({
     // Persist the freshly credited pomodoro count for the focused task.
     if (creditedTaskId) queueTaskPush(get, [creditedTaskId]);
   },
-}));
+    }),
+    {
+      name: "cadence-store",
+      version: 1,
+      storage: createJSONStorage(() => localStorage),
+      // The first client render must match the server's (seed) render, so we
+      // skip automatic rehydration and trigger it manually in CloudSyncProvider
+      // after mount — the cloud layer (when configured) then takes over.
+      skipHydration: true,
+      // Persist only user-authored data; timer + sync flags stay transient.
+      partialize: (state) => ({
+        tasks: state.tasks,
+        categories: state.categories,
+        flashcards: state.flashcards,
+        activeTaskId: state.activeTaskId,
+      }),
+    }
+  )
+);
