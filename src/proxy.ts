@@ -57,9 +57,22 @@ export async function proxy(request: NextRequest) {
     });
 
     // IMPORTANT: getUser() refreshes the token and must run before the redirect.
+    //
+    // A paused/cold free-tier Supabase can make this hang on the first request
+    // after idle (it doesn't error, it just stalls). Since auth runs on every
+    // request, a stall would block the whole response until the platform kills
+    // it — surfacing as "page couldn't load". Cap it so we fail open fast (the
+    // catch below serves the app in local-only mode; cloud data stays safe
+    // behind RLS) instead of hanging the initial load.
+    const AUTH_TIMEOUT_MS = 2500;
     const {
       data: { user },
-    } = await supabase.auth.getUser();
+    } = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("auth-timeout")), AUTH_TIMEOUT_MS)
+      ),
+    ]);
 
     const { pathname } = request.nextUrl;
 
