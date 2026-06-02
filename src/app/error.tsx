@@ -29,6 +29,12 @@ export default function Error({
           We hit an unexpected snag. You can try again, and if it keeps
           happening, refresh the page.
         </p>
+        {(error.message || error.digest) && (
+          <pre className="mt-4 max-h-32 w-full overflow-auto rounded-lg bg-[#f7eee4] px-3 py-2 text-left text-xs break-words whitespace-pre-wrap text-[#8a7d6b]">
+            {error.message}
+            {error.digest ? `\n(ref: ${error.digest})` : ""}
+          </pre>
+        )}
         <Button
           onClick={() => unstable_retry()}
           className="mt-6 bg-[#a35d4d] text-white hover:bg-[#8f4f41]"
