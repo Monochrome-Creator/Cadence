@@ -31,49 +31,59 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  let response = NextResponse.next({ request });
+  // Auth runs on every request, so a Supabase hiccup (transient network error,
+  // stale/corrupt cookie, token-refresh failure) must never crash the whole
+  // site. Any failure here fails OPEN: we fall through to local-only mode (the
+  // client store still works, and cloud data stays protected by RLS) rather
+  // than returning a 500 for every route.
+  try {
+    let response = NextResponse.next({ request });
 
-  const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
+    const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          for (const { name, value } of cookiesToSet) {
+            request.cookies.set(name, value);
+          }
+          response = NextResponse.next({ request });
+          for (const { name, value, options } of cookiesToSet) {
+            response.cookies.set(name, value, options);
+          }
+        },
       },
-      setAll(cookiesToSet) {
-        for (const { name, value } of cookiesToSet) {
-          request.cookies.set(name, value);
-        }
-        response = NextResponse.next({ request });
-        for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
-        }
-      },
-    },
-  });
+    });
 
-  // IMPORTANT: getUser() refreshes the token and must run before the redirect.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    // IMPORTANT: getUser() refreshes the token and must run before the redirect.
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+    const { pathname } = request.nextUrl;
 
-  // Signed out and visiting a protected route → send to login (remember target).
-  if (!user && !isPublicPath(pathname)) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
+    // Signed out and visiting a protected route → send to login (remember target).
+    if (!user && !isPublicPath(pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", pathname);
+      return NextResponse.redirect(url);
+    }
+
+    // Already signed in but on the login screen → go to the workspace.
+    if (user && pathname === "/login") {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      url.searchParams.delete("next");
+      return NextResponse.redirect(url);
+    }
+
+    return response;
+  } catch (error) {
+    console.error("[cadence] auth proxy error — failing open", error);
+    return NextResponse.next({ request });
   }
-
-  // Already signed in but on the login screen → go to the workspace.
-  if (user && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    url.searchParams.delete("next");
-    return NextResponse.redirect(url);
-  }
-
-  return response;
 }
 
 export const config = {
