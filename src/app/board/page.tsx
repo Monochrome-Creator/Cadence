@@ -36,6 +36,7 @@ import {
   Minus,
   Pencil,
   Plus,
+  RefreshCw,
   Repeat,
   Tags,
   Target,
@@ -935,6 +936,20 @@ export default function BoardPage() {
   const addCategory = useProdStore((state) => state.addCategory);
   const renameCategory = useProdStore((state) => state.renameCategory);
   const deleteCategory = useProdStore((state) => state.deleteCategory);
+  const forceSync = useProdStore((state) => state.forceSync);
+
+  // Manual cloud refresh — spins the icon while the round-trip is in flight.
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      // forceSync never throws (it fails soft to offline), so this is safe.
+      await forceSync();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortDirection, setSortDirection] = useState<SortDirection>("none");
@@ -1241,6 +1256,20 @@ export default function BoardPage() {
                 )}
               </SelectContent>
             </Select>
+
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              title="Refresh from cloud"
+              aria-label="Refresh from cloud"
+              className="h-9 min-w-9 gap-2 rounded-full border-[#e8e0d5] bg-white/80 px-4 text-sm text-[#6b5f50] hover:bg-[#f7eee4] hover:text-[#a35d4d]"
+            >
+              <RefreshCw
+                className={cn("size-4", isRefreshing && "animate-spin")}
+              />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
           </div>
         </header>
 

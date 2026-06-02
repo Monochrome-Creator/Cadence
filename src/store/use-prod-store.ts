@@ -187,6 +187,13 @@ interface ProdState {
    * first run). Safe to call multiple times; intended for app mount.
    */
   hydrate: () => Promise<void>;
+  /**
+   * Manual "refresh from cloud" — re-pulls the latest cloud state on demand
+   * (unlike `hydrate`, which only runs once at mount). Re-entrant-safe and
+   * always fails soft: a network error keeps the local data and flips the
+   * status to "offline" rather than throwing.
+   */
+  forceSync: () => Promise<void>;
 
   // Timer actions
   startTimer: () => void;
@@ -696,6 +703,43 @@ export const useProdStore = create<ProdState>()(
       set({ connectionStatus: "offline" });
     } finally {
       set({ isHydrated: true, isSyncing: false });
+    }
+  },
+
+  forceSync: async () => {
+    // Purely local install — there's no cloud to refresh against.
+    if (!isSupabaseConfigured) {
+      set({ connectionStatus: "offline" });
+      return;
+    }
+    // Skip if a sync (initial hydrate or another refresh) is already running.
+    if (get().isSyncing) return;
+    set({ isSyncing: true, connectionStatus: "connecting" });
+    try {
+      await ensureUserRow();
+      const cloudTasks = await pullTasks();
+      if (cloudTasks === null) {
+        // Read failed/timed out — keep local data, report the disconnect.
+        set({ connectionStatus: "offline" });
+        return;
+      }
+      if (cloudTasks.length > 0) {
+        // Adopt the cloud copy (persist middleware writes it to localStorage).
+        set({ tasks: cloudTasks });
+      } else {
+        // Cloud is empty — seed it from local so nothing is lost.
+        await pushTasks(get().tasks);
+      }
+      const cloudCategories = await pullCategories();
+      if (cloudCategories && cloudCategories.length > 0) {
+        set({ categories: cloudCategories });
+      }
+      set({ connectionStatus: "synced" });
+    } catch (error) {
+      console.error("[cadence] forceSync failed", error);
+      set({ connectionStatus: "offline" });
+    } finally {
+      set({ isSyncing: false });
     }
   },
 
