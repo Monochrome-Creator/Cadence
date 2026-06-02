@@ -32,7 +32,7 @@ function isPublicPath(pathname: string): boolean {
 function hasSupabaseSessionCookie(request: NextRequest): boolean {
   return request.cookies
     .getAll()
-    .some(({ name }) => name.startsWith("sb-") && name.includes("-auth-token"));
+    .some(({ name }) => /^sb-.+-auth-token(?:\.\d+)?$/.test(name));
 }
 
 export function proxy(request: NextRequest) {
