@@ -1,24 +1,23 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /* -------------------------------------------------------------------------- */
 /*                       Auth proxy (Next.js 16 "proxy")                      */
 /* -------------------------------------------------------------------------- */
 /**
- * Runs before every matched route. It (1) refreshes the Supabase auth session
- * cookie and (2) gates the workspace: signed-out users are redirected to
- * `/login`, and signed-in users are bounced away from `/login`.
+ * Runs before page routes and keeps the signed-out experience pointed at
+ * `/login`. It deliberately does NOT call Supabase: the workspace is
+ * local-first, and a stale mobile session must never block page rendering.
  *
- * When Supabase is not configured, this is a pass-through so the app still runs
- * in local-only mode without credentials.
+ * The browser sync layer validates the session in the background and Supabase
+ * Row Level Security protects cloud data. If a cookie is stale or malformed,
+ * the board still opens with its on-device copy and reports offline mode.
  */
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 /** Routes reachable without a session. */
-const PUBLIC_PATHS = ["/login", "/auth"];
-const PWA_RECOVERY_PATHS = ["/offline"];
+const PUBLIC_PATHS = ["/login", "/auth", "/offline"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
@@ -26,84 +25,32 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-export async function proxy(request: NextRequest) {
-  // The offline route must never wait for Supabase. It is the recovery screen
-  // used when the app cannot reach the network reliably.
-  if (PWA_RECOVERY_PATHS.includes(request.nextUrl.pathname)) {
-    return NextResponse.next();
-  }
+/**
+ * `@supabase/ssr` stores the browser session in `sb-*-auth-token` cookies. Long
+ * sessions may be split into `.0`, `.1`, etc. chunks, so match the shared stem.
+ */
+function hasSupabaseSessionCookie(request: NextRequest): boolean {
+  return request.cookies
+    .getAll()
+    .some(({ name }) => name.startsWith("sb-") && name.includes("-auth-token"));
+}
 
+export function proxy(request: NextRequest) {
   // No credentials → local-only mode, never redirect.
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     return NextResponse.next();
   }
 
-  // Auth runs on every request, so a Supabase hiccup (transient network error,
-  // stale/corrupt cookie, token-refresh failure) must never crash the whole
-  // site. Any failure here fails OPEN: we fall through to local-only mode (the
-  // client store still works, and cloud data stays protected by RLS) rather
-  // than returning a 500 for every route.
-  try {
-    let response = NextResponse.next({ request });
-
-    const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          for (const { name, value } of cookiesToSet) {
-            request.cookies.set(name, value);
-          }
-          response = NextResponse.next({ request });
-          for (const { name, value, options } of cookiesToSet) {
-            response.cookies.set(name, value, options);
-          }
-        },
-      },
-    });
-
-    // IMPORTANT: getUser() refreshes the token and must run before the redirect.
-    //
-    // A paused/cold free-tier Supabase can make this hang on the first request
-    // after idle (it doesn't error, it just stalls). Since auth runs on every
-    // request, a stall would block the whole response until the platform kills
-    // it — surfacing as "page couldn't load". Cap it so we fail open fast (the
-    // catch below serves the app in local-only mode; cloud data stays safe
-    // behind RLS) instead of hanging the initial load.
-    const AUTH_TIMEOUT_MS = 2500;
-    const {
-      data: { user },
-    } = await Promise.race([
-      supabase.auth.getUser(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("auth-timeout")), AUTH_TIMEOUT_MS)
-      ),
-    ]);
-
-    const { pathname } = request.nextUrl;
-
-    // Signed out and visiting a protected route → send to login (remember target).
-    if (!user && !isPublicPath(pathname)) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("next", pathname);
-      return NextResponse.redirect(url);
-    }
-
-    // Already signed in but on the login screen → go to the workspace.
-    if (user && pathname === "/login") {
-      const url = request.nextUrl.clone();
-      url.pathname = "/";
-      url.searchParams.delete("next");
-      return NextResponse.redirect(url);
-    }
-
-    return response;
-  } catch (error) {
-    console.error("[cadence] auth proxy error — failing open", error);
-    return NextResponse.next({ request });
+  const { pathname } = request.nextUrl;
+  if (isPublicPath(pathname) || hasSupabaseSessionCookie(request)) {
+    return NextResponse.next();
   }
+
+  // Signed out and visiting a protected route → send to login (remember target).
+  const url = request.nextUrl.clone();
+  url.pathname = "/login";
+  url.searchParams.set("next", pathname);
+  return NextResponse.redirect(url);
 }
 
 export const config = {

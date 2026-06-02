@@ -57,9 +57,15 @@ export function AccountFooter() {
   useEffect(() => {
     const supabase = getSupabaseClient();
     if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => {
-      setEmail(data.user?.email ?? null);
-    });
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        setEmail(data.user?.email ?? null);
+      })
+      .catch(() => {
+        // A stale mobile session should quietly stay in local-only mode.
+        setEmail(null);
+      });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setEmail(session?.user?.email ?? null);
     });
