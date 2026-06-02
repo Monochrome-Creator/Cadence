@@ -6,7 +6,7 @@
 // the network; we only step in to show a cached offline screen when a page
 // navigation fails because there's no connection.
 
-const CACHE = "cadence-v3";
+const CACHE = "cadence-v4";
 const OFFLINE_URL = "/offline.html";
 
 // Last-resort fallback used if the worker was installed on an unreliable
@@ -73,17 +73,34 @@ self.addEventListener("fetch", (event) => {
   // network untouched.
   if (request.method !== "GET" || request.mode !== "navigate") return;
 
-  event.respondWith(
-    fetch(request).catch(() =>
-      caches
-        .match(OFFLINE_URL)
-        .then(
-          (res) =>
-            res ??
-            new Response(OFFLINE_HTML, {
-              headers: { "Content-Type": "text/html; charset=utf-8" },
-            }),
-        ),
-    ),
-  );
+  event.respondWith(handleNavigation(request));
 });
+
+/**
+ * Network-first navigation with an offline fallback.
+ *
+ * IMPORTANT: a navigation request rejects any response whose `redirected` flag
+ * is set, surfacing as "this page couldn't load" the moment the worker (rather
+ * than the browser) controls the page — i.e. on the first refresh. This app
+ * redirects a lot (/ → /board, and signed-out routes → /login), so we re-issue
+ * a redirected response as an explicit redirect: the browser then navigates to
+ * the final URL, which comes back as a direct (non-redirected) response and
+ * loads normally.
+ */
+async function handleNavigation(request) {
+  try {
+    const response = await fetch(request);
+    if (response.redirected) {
+      return Response.redirect(response.url, 307);
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(OFFLINE_URL);
+    return (
+      cached ??
+      new Response(OFFLINE_HTML, {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      })
+    );
+  }
+}
