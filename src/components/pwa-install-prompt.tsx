@@ -33,65 +33,36 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // Register the service worker once, and auto-apply new versions so users
-  // never have to uninstall/reinstall to get updates. `updateViaCache: "none"`
-  // forces the browser to revalidate sw.js itself on each load (otherwise it
-  // can be served from HTTP cache and the new worker is never discovered). When
-  // a fresh worker finishes installing while one is already controlling the
-  // page, we reload once to hand control over to it.
+  // We intentionally DO NOT register a service worker. Earlier versions
+  // intercepted navigations and, on iOS, broke page loads ("this page couldn't
+  // load") on every refresh — and because Safari shares the worker with the
+  // installed PWA, both failed together. Instead, on every load we tear down
+  // any worker still registered on this device and wipe its caches, so the app
+  // always loads straight from the network. (The deployed /sw.js is a kill
+  // switch that also unregisters itself for devices that can't reach this code
+  // because the old worker is still breaking their page loads.)
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-
-    let reloading = false;
-    const onControllerChange = () => {
-      if (reloading) return;
-      reloading = true;
-      window.location.reload();
-    };
-    navigator.serviceWorker.addEventListener(
-      "controllerchange",
-      onControllerChange,
-    );
-
-    navigator.serviceWorker
-      .register("/sw.js", { updateViaCache: "none" })
-      .then((registration) => {
-        // Recover clients that already had an update waiting before this page
-        // loaded.
-        registration.waiting?.postMessage({ type: "SKIP_WAITING" });
-
-        registration.addEventListener("updatefound", () => {
-          const installing = registration.installing;
-          if (!installing) return;
-          installing.addEventListener("statechange", () => {
-            // A new worker is installed and an old one still controls the page
-            // → activate it now (it calls skipWaiting), which fires
-            // controllerchange above and triggers the one-time reload.
-            if (
-              installing.state === "installed" &&
-              navigator.serviceWorker.controller
-            ) {
-              installing.postMessage({ type: "SKIP_WAITING" });
-            }
-          });
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => {
+          for (const registration of registrations) {
+            void registration.unregister();
+          }
+        })
+        .catch(() => {
+          // Best-effort cleanup; failures shouldn't break the app.
         });
+    }
 
-        // Explicitly check for a newer worker on each app launch after the
-        // listener is ready for fast updates.
-        void registration.update().catch(() => {
-          // A failed update check is harmless; the active worker keeps running.
+    if ("caches" in window) {
+      caches
+        .keys()
+        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+        .catch(() => {
+          // Best-effort cleanup; failures shouldn't break the app.
         });
-      })
-      .catch(() => {
-        // Registration failures shouldn't break the app.
-      });
-
-    return () => {
-      navigator.serviceWorker.removeEventListener(
-        "controllerchange",
-        onControllerChange,
-      );
-    };
+    }
   }, []);
 
   useEffect(() => {
