@@ -18,6 +18,17 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The worker owns the offline copy. Revalidate the source when a new
+        // worker installs so recovery UI can change between deployments.
+        source: "/offline.html",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache, must-revalidate",
+          },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },

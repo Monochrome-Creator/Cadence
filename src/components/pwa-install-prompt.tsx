@@ -56,6 +56,10 @@ export function PwaInstallPrompt() {
     navigator.serviceWorker
       .register("/sw.js", { updateViaCache: "none" })
       .then((registration) => {
+        // Recover clients that already had an update waiting before this page
+        // loaded.
+        registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+
         registration.addEventListener("updatefound", () => {
           const installing = registration.installing;
           if (!installing) return;
@@ -70,6 +74,12 @@ export function PwaInstallPrompt() {
               installing.postMessage({ type: "SKIP_WAITING" });
             }
           });
+        });
+
+        // Explicitly check for a newer worker on each app launch after the
+        // listener is ready for fast updates.
+        void registration.update().catch(() => {
+          // A failed update check is harmless; the active worker keeps running.
         });
       })
       .catch(() => {

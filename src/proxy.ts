@@ -18,6 +18,7 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 /** Routes reachable without a session. */
 const PUBLIC_PATHS = ["/login", "/auth"];
+const PWA_RECOVERY_PATHS = ["/offline"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
@@ -26,6 +27,12 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function proxy(request: NextRequest) {
+  // The offline route must never wait for Supabase. It is the recovery screen
+  // used when the app cannot reach the network reliably.
+  if (PWA_RECOVERY_PATHS.includes(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
   // No credentials → local-only mode, never redirect.
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     return NextResponse.next();
@@ -105,8 +112,9 @@ export const config = {
      * Run on every path EXCEPT static assets and the PWA files:
      * - _next/static, _next/image (build assets)
      * - favicon.ico, manifest.webmanifest (metadata)
+     * - sw.js, offline.html (auth-independent PWA recovery files)
      * - image files (icons, etc.)
      */
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:png|svg|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|offline.html|.*\\.(?:png|svg|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

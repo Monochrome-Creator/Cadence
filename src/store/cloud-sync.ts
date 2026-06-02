@@ -49,11 +49,37 @@ type SubtaskRow = {
 
 export { isSupabaseConfigured };
 
+const CLOUD_TIMEOUT_MS = 5000;
+
+/**
+ * Mobile networks can leave fetches pending for a long time without rejecting.
+ * Settle cloud work promptly so the local-first UI can keep working and report
+ * offline mode instead of appearing stuck on "Syncing".
+ */
+function withTimeout<T>(operation: PromiseLike<T>, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out`)),
+      CLOUD_TIMEOUT_MS
+    );
+    Promise.resolve(operation).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 /* ------------------------------- auth helper ----------------------------- */
 
 /** The signed-in user's id, or `null` when not authenticated. */
 async function getUserId(supabase: SupabaseClient): Promise<string | null> {
-  const { data } = await supabase.auth.getUser();
+  const { data } = await withTimeout(supabase.auth.getUser(), "get user");
   return data.user?.id ?? null;
 }
 
@@ -123,35 +149,47 @@ function rowToSubtask(row: SubtaskRow): Subtask {
 export async function pullTasks(): Promise<Task[] | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
-  if (!(await getUserId(supabase))) return null;
 
-  // RLS scopes both reads to the current user automatically.
-  const [taskRes, subtaskRes] = await Promise.all([
-    supabase.from("tasks").select("*").order("task_order", { ascending: true }),
-    supabase
-      .from("subtasks")
-      .select("*")
-      .order("subtask_order", { ascending: true }),
-  ]);
+  try {
+    if (!(await getUserId(supabase))) return null;
 
-  if (taskRes.error || subtaskRes.error) {
-    console.error(
-      "[cadence] cloud pull failed",
-      taskRes.error ?? subtaskRes.error
+    // RLS scopes both reads to the current user automatically.
+    const [taskRes, subtaskRes] = await Promise.all([
+      withTimeout(
+        supabase.from("tasks").select("*").order("task_order", { ascending: true }),
+        "pull tasks"
+      ),
+      withTimeout(
+        supabase
+          .from("subtasks")
+          .select("*")
+          .order("subtask_order", { ascending: true }),
+        "pull subtasks"
+      ),
+    ]);
+
+    if (taskRes.error || subtaskRes.error) {
+      console.error(
+        "[cadence] cloud pull failed",
+        taskRes.error ?? subtaskRes.error
+      );
+      return null;
+    }
+
+    const subtasksByTask = new Map<string, Subtask[]>();
+    for (const row of (subtaskRes.data ?? []) as SubtaskRow[]) {
+      const list = subtasksByTask.get(row.task_id) ?? [];
+      list.push(rowToSubtask(row));
+      subtasksByTask.set(row.task_id, list);
+    }
+
+    return ((taskRes.data ?? []) as TaskRow[]).map((row) =>
+      rowToTask(row, subtasksByTask.get(row.id) ?? [])
     );
+  } catch (error) {
+    console.error("[cadence] cloud pull threw", error);
     return null;
   }
-
-  const subtasksByTask = new Map<string, Subtask[]>();
-  for (const row of (subtaskRes.data ?? []) as SubtaskRow[]) {
-    const list = subtasksByTask.get(row.task_id) ?? [];
-    list.push(rowToSubtask(row));
-    subtasksByTask.set(row.task_id, list);
-  }
-
-  return ((taskRes.data ?? []) as TaskRow[]).map((row) =>
-    rowToTask(row, subtasksByTask.get(row.id) ?? [])
-  );
 }
 
 /* --------------------------------- push ---------------------------------- */
@@ -163,13 +201,20 @@ export async function pullTasks(): Promise<Task[] | null> {
 export async function ensureUserRow(): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-  if (!user) return;
-  const { error } = await supabase
-    .from("users")
-    .upsert({ id: user.id, email: user.email }, { onConflict: "id" });
-  if (error) console.error("[cadence] ensure user failed", error);
+  try {
+    const { data } = await withTimeout(supabase.auth.getUser(), "get user");
+    const user = data.user;
+    if (!user) return;
+    const { error } = await withTimeout(
+      supabase
+        .from("users")
+        .upsert({ id: user.id, email: user.email }, { onConflict: "id" }),
+      "ensure user"
+    );
+    if (error) console.error("[cadence] ensure user failed", error);
+  } catch (error) {
+    console.error("[cadence] ensure user threw", error);
+  }
 }
 
 /**
@@ -187,9 +232,10 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
     if (!userId) return false;
 
     const taskRows = tasks.map((task) => taskToRow(task, userId));
-    const { error: taskErr } = await supabase
-      .from("tasks")
-      .upsert(taskRows, { onConflict: "id" });
+    const { error: taskErr } = await withTimeout(
+      supabase.from("tasks").upsert(taskRows, { onConflict: "id" }),
+      "push tasks"
+    );
     if (taskErr) {
       console.error("[cadence] push tasks failed", taskErr);
       return false;
@@ -203,9 +249,10 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
       )
     );
     if (subtaskRows.length > 0) {
-      const { error: subErr } = await supabase
-        .from("subtasks")
-        .upsert(subtaskRows, { onConflict: "id" });
+      const { error: subErr } = await withTimeout(
+        supabase.from("subtasks").upsert(subtaskRows, { onConflict: "id" }),
+        "push subtasks"
+      );
       if (subErr) {
         console.error("[cadence] push subtasks failed", subErr);
         ok = false;
@@ -220,8 +267,11 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
         .map((s) => s.id)
         .filter((id) => keepIds.has(id));
       const { error: delErr } = liveIds.length
-        ? await query.not("id", "in", `(${liveIds.join(",")})`)
-        : await query;
+        ? await withTimeout(
+            query.not("id", "in", `(${liveIds.join(",")})`),
+            "prune subtasks"
+          )
+        : await withTimeout(query, "prune subtasks");
       if (delErr) {
         console.error("[cadence] prune subtasks failed", delErr);
         ok = false;
@@ -245,31 +295,39 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
 export async function pullCategories(): Promise<string[] | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
-  const userId = await getUserId(supabase);
-  if (!userId) return null;
-  const { data, error } = await supabase
-    .from("users")
-    .select("categories")
-    .eq("id", userId)
-    .maybeSingle();
-  if (error) {
-    console.error("[cadence] pull categories failed", error);
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return null;
+    const { data, error } = await withTimeout(
+      supabase.from("users").select("categories").eq("id", userId).maybeSingle(),
+      "pull categories"
+    );
+    if (error) {
+      console.error("[cadence] pull categories failed", error);
+      return null;
+    }
+    return ((data?.categories as string[] | null) ?? []);
+  } catch (error) {
+    console.error("[cadence] pull categories threw", error);
     return null;
   }
-  return ((data?.categories as string[] | null) ?? []);
 }
 
 /** Persists the user's managed (ordered) category list. Fire-and-forget. */
 export async function pushCategories(categories: string[]): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
-  const userId = await getUserId(supabase);
-  if (!userId) return;
-  const { error } = await supabase
-    .from("users")
-    .update({ categories })
-    .eq("id", userId);
-  if (error) console.error("[cadence] push categories failed", error);
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return;
+    const { error } = await withTimeout(
+      supabase.from("users").update({ categories }).eq("id", userId),
+      "push categories"
+    );
+    if (error) console.error("[cadence] push categories failed", error);
+  } catch (error) {
+    console.error("[cadence] push categories threw", error);
+  }
 }
 
 /**
@@ -280,7 +338,10 @@ export async function deleteTaskRemote(taskId: string): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
   try {
-    const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+    const { error } = await withTimeout(
+      supabase.from("tasks").delete().eq("id", taskId),
+      "delete task"
+    );
     if (error) {
       console.error("[cadence] delete task failed", error);
       return false;
