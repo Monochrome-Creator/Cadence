@@ -62,6 +62,14 @@ export interface Flashcard {
   answer: string;
 }
 
+/**
+ * Cloud connection state surfaced by the UI status dot:
+ *  - "synced"     — last cloud round-trip succeeded.
+ *  - "connecting" — a pull/push is in flight.
+ *  - "offline"    — cloud disabled, signed out, or the last request failed.
+ */
+export type ConnectionStatus = "synced" | "connecting" | "offline";
+
 /* -------------------------------------------------------------------------- */
 /*                               Pomodoro engine                              */
 /* -------------------------------------------------------------------------- */
@@ -104,6 +112,8 @@ interface ProdState {
   isHydrated: boolean;
   /** True while a pull/push round-trip is in flight. */
   isSyncing: boolean;
+  /** Tri-state cloud connection status driving the header status dot. */
+  connectionStatus: ConnectionStatus;
 
   // Timer
   mode: TimerMode;
@@ -322,7 +332,11 @@ function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
     const ids = new Set(pendingTaskIds);
     pendingTaskIds.clear();
     const tasks = getState().tasks.filter((task) => ids.has(task.id));
-    if (tasks.length > 0) void pushTasks(tasks);
+    if (tasks.length === 0) return;
+    useProdStore.setState({ connectionStatus: "connecting" });
+    void pushTasks(tasks).then((ok) =>
+      useProdStore.setState({ connectionStatus: ok ? "synced" : "offline" })
+    );
   }, 400);
 }
 
@@ -351,6 +365,9 @@ export const useProdStore = create<ProdState>()(
   cloudEnabled: isSupabaseConfigured,
   isHydrated: false,
   isSyncing: false,
+  // Start "connecting" when cloud is on (hydrate runs at mount); otherwise the
+  // app is purely local, which we surface as "offline" (on-device data).
+  connectionStatus: isSupabaseConfigured ? "connecting" : "offline",
 
   mode: "focus",
   timeLeft: TIMER_DURATIONS.focus,
@@ -407,7 +424,12 @@ export const useProdStore = create<ProdState>()(
       // Clear the focus selection if the active task is being removed.
       activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
     }));
-    if (isSupabaseConfigured) void deleteTaskRemote(id);
+    if (isSupabaseConfigured) {
+      set({ connectionStatus: "connecting" });
+      void deleteTaskRemote(id).then((ok) =>
+        set({ connectionStatus: ok ? "synced" : "offline" })
+      );
+    }
   },
   reorderTasks: (activeId, overId) => {
     set((state) => {
@@ -639,12 +661,14 @@ export const useProdStore = create<ProdState>()(
       set({ isHydrated: true });
       return;
     }
-    set({ isSyncing: true });
+    set({ isSyncing: true, connectionStatus: "connecting" });
     try {
       await ensureUserRow();
       const cloudTasks = await pullTasks();
       if (cloudTasks === null) {
-        // Read failed — stay on local state but mark hydrated so the UI loads.
+        // Read failed (offline, signed out, or timeout) — stay on local state
+        // but mark hydrated so the UI loads, and flag the disconnect.
+        set({ connectionStatus: "offline" });
         return;
       }
       if (cloudTasks.length > 0) {
@@ -666,8 +690,10 @@ export const useProdStore = create<ProdState>()(
         set({ categories: seeded });
         await pushCategories(seeded);
       }
+      set({ connectionStatus: "synced" });
     } catch (error) {
       console.error("[cadence] hydrate failed", error);
+      set({ connectionStatus: "offline" });
     } finally {
       set({ isHydrated: true, isSyncing: false });
     }

@@ -174,45 +174,65 @@ export async function ensureUserRow(): Promise<void> {
 
 /**
  * Upserts the given tasks and their subtasks to the cloud. Subtasks that no
- * longer exist locally are removed so deletions propagate. Fire-and-forget:
- * failures are logged but never throw into the UI.
+ * longer exist locally are removed so deletions propagate. Never throws into
+ * the UI: returns `true` when the round-trip fully succeeded, `false` when sync
+ * is unavailable or any write failed/timed out (so callers can show "offline").
  */
-export async function pushTasks(tasks: Task[]): Promise<void> {
+export async function pushTasks(tasks: Task[]): Promise<boolean> {
   const supabase = getSupabaseClient();
-  if (!supabase || tasks.length === 0) return;
-  const userId = await getUserId(supabase);
-  if (!userId) return;
+  if (!supabase || tasks.length === 0) return false;
 
-  const taskRows = tasks.map((task) => taskToRow(task, userId));
-  const { error: taskErr } = await supabase
-    .from("tasks")
-    .upsert(taskRows, { onConflict: "id" });
-  if (taskErr) {
-    console.error("[cadence] push tasks failed", taskErr);
-    return;
-  }
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return false;
 
-  const subtaskRows = tasks.flatMap((task) =>
-    task.subtasks.map((subtask, index) => subtaskToRow(subtask, task.id, index))
-  );
-  if (subtaskRows.length > 0) {
-    const { error: subErr } = await supabase
-      .from("subtasks")
-      .upsert(subtaskRows, { onConflict: "id" });
-    if (subErr) console.error("[cadence] push subtasks failed", subErr);
-  }
+    const taskRows = tasks.map((task) => taskToRow(task, userId));
+    const { error: taskErr } = await supabase
+      .from("tasks")
+      .upsert(taskRows, { onConflict: "id" });
+    if (taskErr) {
+      console.error("[cadence] push tasks failed", taskErr);
+      return false;
+    }
 
-  // Drop subtasks that were removed locally for the affected tasks.
-  const keepIds = new Set(subtaskRows.map((row) => row.id));
-  for (const task of tasks) {
-    const query = supabase.from("subtasks").delete().eq("task_id", task.id);
-    const liveIds = task.subtasks
-      .map((s) => s.id)
-      .filter((id) => keepIds.has(id));
-    const { error: delErr } = liveIds.length
-      ? await query.not("id", "in", `(${liveIds.join(",")})`)
-      : await query;
-    if (delErr) console.error("[cadence] prune subtasks failed", delErr);
+    let ok = true;
+
+    const subtaskRows = tasks.flatMap((task) =>
+      task.subtasks.map((subtask, index) =>
+        subtaskToRow(subtask, task.id, index)
+      )
+    );
+    if (subtaskRows.length > 0) {
+      const { error: subErr } = await supabase
+        .from("subtasks")
+        .upsert(subtaskRows, { onConflict: "id" });
+      if (subErr) {
+        console.error("[cadence] push subtasks failed", subErr);
+        ok = false;
+      }
+    }
+
+    // Drop subtasks that were removed locally for the affected tasks.
+    const keepIds = new Set(subtaskRows.map((row) => row.id));
+    for (const task of tasks) {
+      const query = supabase.from("subtasks").delete().eq("task_id", task.id);
+      const liveIds = task.subtasks
+        .map((s) => s.id)
+        .filter((id) => keepIds.has(id));
+      const { error: delErr } = liveIds.length
+        ? await query.not("id", "in", `(${liveIds.join(",")})`)
+        : await query;
+      if (delErr) {
+        console.error("[cadence] prune subtasks failed", delErr);
+        ok = false;
+      }
+    }
+
+    return ok;
+  } catch (error) {
+    // Network failure / timeout — fail soft so the UI can show "offline".
+    console.error("[cadence] push tasks threw", error);
+    return false;
   }
 }
 
@@ -252,12 +272,24 @@ export async function pushCategories(categories: string[]): Promise<void> {
   if (error) console.error("[cadence] push categories failed", error);
 }
 
-/** Deletes a task (subtasks cascade via the FK) from the cloud. */
-export async function deleteTaskRemote(taskId: string): Promise<void> {
+/**
+ * Deletes a task (subtasks cascade via the FK) from the cloud. Returns `true`
+ * on success, `false` when sync is off or the delete failed/timed out.
+ */
+export async function deleteTaskRemote(taskId: string): Promise<boolean> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
-  const { error } = await supabase.from("tasks").delete().eq("id", taskId);
-  if (error) console.error("[cadence] delete task failed", error);
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+    if (error) {
+      console.error("[cadence] delete task failed", error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("[cadence] delete task threw", error);
+    return false;
+  }
 }
 
 /** Replaces the entire remote task set for this user (used when seeding). */

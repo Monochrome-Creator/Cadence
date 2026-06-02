@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { MobileNav, Sidebar } from "@/components/sidebar";
 import { CloudSyncProvider } from "@/components/cloud-sync-provider";
+import { ConnectionStatus } from "@/components/connection-status";
 import { NotificationManager } from "@/components/notification-manager";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 
@@ -55,6 +56,7 @@ export default function RootLayout({
       <body className="flex min-h-full overflow-x-clip bg-[#fdfbf7] p-2 text-[#3a322a] md:p-3">
         <CloudSyncProvider />
         <NotificationManager />
+        <ConnectionStatus />
         <PwaInstallPrompt />
         <Sidebar />
         <main className="h-[calc(100vh-1rem)] min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:h-[calc(100vh-1.5rem)] md:pb-0">
