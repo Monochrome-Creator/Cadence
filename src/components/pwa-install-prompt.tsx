@@ -33,13 +33,55 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // Register the service worker once.
+  // Register the service worker once, and auto-apply new versions so users
+  // never have to uninstall/reinstall to get updates. `updateViaCache: "none"`
+  // forces the browser to revalidate sw.js itself on each load (otherwise it
+  // can be served from HTTP cache and the new worker is never discovered). When
+  // a fresh worker finishes installing while one is already controlling the
+  // page, we reload once to hand control over to it.
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.register("/sw.js").catch(() => {
+    if (!("serviceWorker" in navigator)) return;
+
+    let reloading = false;
+    const onControllerChange = () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    };
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      onControllerChange,
+    );
+
+    navigator.serviceWorker
+      .register("/sw.js", { updateViaCache: "none" })
+      .then((registration) => {
+        registration.addEventListener("updatefound", () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener("statechange", () => {
+            // A new worker is installed and an old one still controls the page
+            // → activate it now (it calls skipWaiting), which fires
+            // controllerchange above and triggers the one-time reload.
+            if (
+              installing.state === "installed" &&
+              navigator.serviceWorker.controller
+            ) {
+              installing.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
+      })
+      .catch(() => {
         // Registration failures shouldn't break the app.
       });
-    }
+
+    return () => {
+      navigator.serviceWorker.removeEventListener(
+        "controllerchange",
+        onControllerChange,
+      );
+    };
   }, []);
 
   useEffect(() => {

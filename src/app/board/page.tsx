@@ -142,7 +142,7 @@ const RECURRENCE_LABELS: Record<Recurrence, string> = {
 };
 
 const PILL_TRIGGER =
-  "h-auto w-auto justify-center gap-1 rounded-full border-0 px-3 py-1 text-xs font-medium shadow-none md:w-full";
+  "h-auto w-auto justify-center gap-1 rounded-full border-0 px-3 py-2 text-xs font-medium shadow-none md:w-full md:py-1";
 
 const GRID_COLS =
   "md:grid-cols-[minmax(0,1fr)_120px_108px_120px_128px_84px_76px]";
@@ -281,7 +281,7 @@ function SessionStepper({
         aria-label="Decrease sessions"
         disabled={value <= 0}
         onClick={() => onChange(value - 1)}
-        className="flex size-6 shrink-0 items-center justify-center rounded-full text-[#b3a692] opacity-100 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] disabled:pointer-events-none disabled:opacity-30 md:size-5 md:opacity-0 md:group-hover:opacity-100 md:disabled:opacity-0"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#b3a692] opacity-100 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] disabled:pointer-events-none disabled:opacity-30 md:size-5 md:opacity-0 md:group-hover:opacity-100 md:disabled:opacity-0"
       >
         <Minus className="size-3" />
       </button>
@@ -302,7 +302,7 @@ function SessionStepper({
         type="button"
         aria-label="Increase sessions"
         onClick={() => onChange(value + 1)}
-        className="flex size-6 shrink-0 items-center justify-center rounded-full text-[#b3a692] opacity-100 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] md:size-5 md:opacity-0 md:group-hover:opacity-100"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#b3a692] opacity-100 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] md:size-5 md:opacity-0 md:group-hover:opacity-100"
       >
         <Plus className="size-3" />
       </button>
@@ -729,7 +729,7 @@ function SortableTaskCard({
           placeholder="Category"
           aria-label="Task category"
           className={cn(
-            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-1 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[#b3a692] focus:ring-2 focus:ring-[#a35d4d]/25 md:col-auto md:w-full",
+            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[#b3a692] focus:ring-2 focus:ring-[#a35d4d]/25 md:col-auto md:w-full md:py-1",
             theme.pill
           )}
         />
@@ -761,7 +761,7 @@ function SortableTaskCard({
                 aria-label="Set recurrence"
                 title={`Repeat: ${RECURRENCE_LABELS[task.recurrence]}`}
                 className={cn(
-                  "size-8 w-8 shrink-0 justify-center gap-0 rounded-full border-0 p-0 shadow-none [&>svg:last-child]:hidden",
+                  "size-10 w-10 shrink-0 justify-center gap-0 rounded-full border-0 p-0 shadow-none md:size-8 md:w-8 [&>svg:last-child]:hidden",
                   task.recurrence !== "none"
                     ? "bg-[#f6e6da] text-[#a35d4d]"
                     : "bg-transparent text-[#b3a692] hover:bg-[#f2eadc] hover:text-[#a35d4d]"
@@ -782,7 +782,7 @@ function SortableTaskCard({
               type="button"
               title="Delete task"
               onClick={() => deleteTask(task.id)}
-              className="flex size-8 items-center justify-center rounded-full text-[#b3a692] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b]"
+              className="flex size-10 items-center justify-center rounded-full text-[#b3a692] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b] md:size-8"
             >
               <Trash2 className="size-4" />
             </button>
@@ -1160,7 +1160,7 @@ export default function BoardPage() {
       <div className="mx-auto max-w-5xl">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="font-heading text-4xl font-semibold tracking-tight text-[#4a4036]">
+            <h1 className="font-heading text-3xl font-semibold tracking-tight text-[#4a4036] md:text-4xl">
               Main Board
             </h1>
             <p className="mt-2 text-sm text-[#9c8e7c]">
@@ -1175,7 +1175,7 @@ export default function BoardPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select
               value={statusFilter}
               onValueChange={(value) => setStatusFilter(value as StatusFilter)}

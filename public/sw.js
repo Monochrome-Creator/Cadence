@@ -28,6 +28,12 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// The page asks a freshly-installed worker to take over immediately (instead of
+// waiting for all tabs to close), so updates apply without an uninstall.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   // Only handle top-level page navigations; let everything else hit the

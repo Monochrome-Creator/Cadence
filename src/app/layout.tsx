@@ -52,12 +52,12 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full bg-[#fdfbf7] p-2 text-[#3a322a] md:p-3">
+      <body className="flex min-h-full overflow-x-clip bg-[#fdfbf7] p-2 text-[#3a322a] md:p-3">
         <CloudSyncProvider />
         <NotificationManager />
         <PwaInstallPrompt />
         <Sidebar />
-        <main className="h-[calc(100vh-1rem)] flex-1 overflow-y-auto pb-24 md:h-[calc(100vh-1.5rem)] md:pb-0">
+        <main className="h-[calc(100vh-1rem)] min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:h-[calc(100vh-1.5rem)] md:pb-0">
           {children}
         </main>
         <MobileNav />
