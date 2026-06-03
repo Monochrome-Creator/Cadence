@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   Layers,
+  LogIn,
   LogOut,
   Timer,
 } from "lucide-react";
@@ -73,7 +74,20 @@ export function AccountFooter() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  if (!isSupabaseConfigured || !email) return null;
+  if (!isSupabaseConfigured) return null;
+
+  // Not logged in — show a sign-in prompt.
+  if (!email) {
+    return (
+      <Link
+        href="/login"
+        className="mt-3 flex items-center gap-2 rounded-2xl bg-[var(--c-panel-soft)] px-3 py-2.5 text-sm font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+      >
+        <LogIn className="size-4 shrink-0" />
+        Sign in to sync
+      </Link>
+    );
+  }
 
   const signOut = async () => {
     const supabase = getSupabaseClient();
@@ -158,8 +172,23 @@ export function Sidebar() {
  */
 export function MobileNav() {
   const pathname = usePathname();
+  const [email, setEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    supabase.auth.getUser().then(({ data }) => {
+      setEmail(data.user?.email ?? null);
+    }).catch(() => setEmail(null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setEmail(session?.user?.email ?? null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   if (isAuthRoute(pathname)) return null;
+
+  const showSignIn = isSupabaseConfigured && !email;
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 flex items-stretch justify-around border-t border-[var(--c-line)] bg-[var(--c-beige)]/95 px-2 pt-1.5 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] backdrop-blur md:hidden">
@@ -182,6 +211,15 @@ export function MobileNav() {
           </Link>
         );
       })}
+      {showSignIn && (
+        <Link
+          href="/login"
+          className="flex flex-1 flex-col items-center gap-0.5 rounded-2xl px-2 py-1.5 text-[11px] font-medium text-[#a35d4d] transition-colors"
+        >
+          <LogIn className="size-5" />
+          Sign in
+        </Link>
+      )}
     </nav>
   );
 }
