@@ -49,18 +49,27 @@ type SubtaskRow = {
 
 export { isSupabaseConfigured };
 
-const CLOUD_TIMEOUT_MS = 5000;
+/** Timeout for routine data operations (pull/push tasks, categories). */
+const CLOUD_TIMEOUT_MS = 5_000;
+
+/**
+ * Longer budget for the `users` row upsert. Supabase Postgres instances can
+ * have a cold-start delay of several seconds on first connection after idle
+ * (especially on free-tier). We use a separate constant so routine data ops
+ * keep the snappy 5 s limit while the one-time session bootstrap is forgiving.
+ */
+const ENSURE_USER_TIMEOUT_MS = 10_000;
 
 /**
  * Mobile networks can leave fetches pending for a long time without rejecting.
  * Settle cloud work promptly so the local-first UI can keep working and report
  * offline mode instead of appearing stuck on "Syncing".
  */
-function withTimeout<T>(operation: PromiseLike<T>, label: string): Promise<T> {
+function withTimeout<T>(operation: PromiseLike<T>, label: string, ms = CLOUD_TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`${label} timed out`)),
-      CLOUD_TIMEOUT_MS
+      ms
     );
     Promise.resolve(operation).then(
       (value) => {
@@ -229,7 +238,8 @@ export async function ensureUserRow(
       supabase
         .from("users")
         .upsert({ id: uid, email: userEmail }, { onConflict: "id" }),
-      "ensure user"
+      "ensure user",
+      ENSURE_USER_TIMEOUT_MS
     );
     if (error) {
       // PostgrestError properties are non-enumerable — serialise explicitly so
@@ -240,11 +250,23 @@ export async function ensureUserRow(
       );
     }
   } catch (error) {
-    const msg =
-      error instanceof Error
-        ? error.message
-        : JSON.stringify(error, Object.getOwnPropertyNames(error as object));
-    console.error("[cadence] ensure user threw", msg);
+    const isTimeout =
+      error instanceof Error && error.message.includes("timed out");
+
+    if (isTimeout) {
+      // Cold-start delay on a serverless Postgres instance. The app continues
+      // in local-first mode — hydrate() will pull tasks if/when the DB wakes.
+      console.warn(
+        "[cadence] Cloud sync delayed due to cold start — continuing in local-first mode"
+      );
+    } else {
+      const msg =
+        error instanceof Error
+          ? error.message
+          : JSON.stringify(error, Object.getOwnPropertyNames(error as object));
+      console.error("[cadence] ensure user threw", msg);
+    }
+    // Always return cleanly so the caller can still attempt hydrate().
   }
 }
 
