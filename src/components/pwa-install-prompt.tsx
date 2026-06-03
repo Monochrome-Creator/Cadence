@@ -33,10 +33,23 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // No service worker is registered. On every load we defensively unregister
-  // any stale worker left over from older app versions and wipe their caches,
-  // so the app always loads straight from the network.
+  // On GitHub Pages, register a caching service worker so that Android Chrome
+  // PWA standalone mode can serve pages on refresh (without a SW, standalone
+  // refreshes hit the network cold and fail with "This page couldn't load").
+  // On every other origin (Vercel, localhost) we defensively unregister any
+  // stale worker and wipe caches so the app always loads from the network.
   useEffect(() => {
+    const isGhPages =
+      typeof window !== "undefined" &&
+      window.location.hostname === "monochrome-creator.github.io";
+
+    if (isGhPages && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/Cadence/sw.js").catch(() => {
+        // Non-fatal — app still works; offline support just won't be available.
+      });
+      return;
+    }
+
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
         .getRegistrations()

@@ -54,10 +54,65 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
 
+      # A caching service worker is required for Android Chrome standalone PWA
+      # mode to serve pages on refresh. Without it, refreshing any page in the
+      # installed PWA results in "This page couldn't load" because Chrome has no
+      # fallback when the network request is slow or fails.
+      - name: Write service worker
+        run: |
+          cat > out/sw.js << 'EOF'
+          const CACHE = "cadence-v1";
+          const SHELL = [
+            "/Cadence/",
+            "/Cadence/board/",
+            "/Cadence/flashcards/",
+            "/Cadence/timer/",
+            "/Cadence/login/",
+            "/Cadence/offline/",
+          ];
+
+          self.addEventListener("install", (event) => {
+            event.waitUntil(
+              caches.open(CACHE).then((cache) => cache.addAll(SHELL))
+            );
+            self.skipWaiting();
+          });
+
+          self.addEventListener("activate", (event) => {
+            event.waitUntil(
+              caches.keys().then((keys) =>
+                Promise.all(
+                  keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))
+                )
+              )
+            );
+            return self.clients.claim();
+          });
+
+          // Serve navigation requests from cache, revalidate in the background.
+          self.addEventListener("fetch", (event) => {
+            if (event.request.mode !== "navigate") return;
+            event.respondWith(
+              caches.match(event.request).then((cached) => {
+                const network = fetch(event.request).then((response) => {
+                  if (response.ok) {
+                    const clone = response.clone();
+                    caches
+                      .open(CACHE)
+                      .then((cache) => cache.put(event.request, clone));
+                  }
+                  return response;
+                });
+                return cached || network;
+              })
+            );
+          });
+          EOF
+
       # GitHub Pages uses Jekyll, which ignores _next/. The .nojekyll file
       # disables Jekyll so the _next/ static assets are served correctly.
       - name: Disable Jekyll
-        run: mkdir -p out && touch out/.nojekyll
+        run: touch out/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
