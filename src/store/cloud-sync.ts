@@ -89,12 +89,15 @@ const SCHEMA_HINT =
   "Apply supabase/schema.sql via the Supabase dashboard → SQL Editor to create the required tables.";
 
 /**
- * Timeout for all Supabase network calls. 10 s is intentionally generous:
- * free-tier Postgres instances can take 8–10 s to wake from idle (cold start).
- * Subsequent warm queries complete in <500 ms, so the extra headroom costs
- * nothing when the DB is already up.
+ * Timeout for all Supabase network calls.
+ *
+ * Free-tier Postgres instances are paused after inactivity and can take
+ * 15–25 s to wake on first hit. 28 s gives the DB enough time to start,
+ * process the request, and return — even under heavy server load.
+ * Warm queries complete in <500 ms, so the extra headroom costs nothing
+ * in the normal case and only matters on cold starts.
  */
-const CLOUD_TIMEOUT_MS = 10_000;
+const CLOUD_TIMEOUT_MS = 28_000;
 
 /**
  * Mobile networks can leave fetches pending for a long time without rejecting.
