@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { ensureUserRow, isSupabaseConfigured } from "@/store/cloud-sync";
+import { ensureUserRow, isSupabaseConfigured, setCurrentUser } from "@/store/cloud-sync";
 import { getSupabaseClient } from "@/utils/supabase/client";
 import { useProdStore } from "@/store/use-prod-store";
 
@@ -51,7 +51,11 @@ export function CloudSyncProvider() {
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (cancelled) return;
 
-        if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
+        if ((event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") && session) {
+          // Cache the confirmed identity so every data op (pullTasks, pushTasks,
+          // ensureUserRow) can use it without an extra network call.
+          setCurrentUser(session.user.id, session.user.email);
+
           if (event === "SIGNED_IN") {
             // User just logged in after the app was already open (e.g. came from
             // the login page). `INITIAL_SESSION` with no session previously set
@@ -60,28 +64,30 @@ export function CloudSyncProvider() {
             useProdStore.setState({ isHydrated: false });
           }
 
-          // Session confirmed — write the users row then pull cloud data.
-          // ensureUserRow returns false on cold-start timeout or DB error;
-          // hydrate() will still run (it only reads) but we guard push separately.
-          await ensureUserRow(session.user.id, session.user.email ?? undefined);
-          await hydrate();
+          // Only run the full sync on session establishment, not token refresh.
+          if (event !== "TOKEN_REFRESHED") {
+            // Session confirmed — write the users row then pull cloud data.
+            await ensureUserRow(session.user.id, session.user.email ?? undefined);
+            await hydrate();
 
-          // If the DB was cold and the first sync attempt failed, schedule one
-          // automatic retry after a short pause to let Postgres finish waking up.
-          // forceSync() calls ensureUserRow() + pullTasks() + pushTasks() again.
-          if (
-            !cancelled &&
-            useProdStore.getState().connectionStatus === "offline"
-          ) {
-            setTimeout(
-              () => void useProdStore.getState().forceSync(),
-              6_000
-            );
+            // If the DB was cold and the first sync failed, retry once after a
+            // short pause to give Postgres time to finish waking up.
+            if (
+              !cancelled &&
+              useProdStore.getState().connectionStatus === "offline"
+            ) {
+              setTimeout(
+                () => void useProdStore.getState().forceSync(),
+                6_000
+              );
+            }
           }
         } else if (
           event === "SIGNED_OUT" ||
           (event === "INITIAL_SESSION" && !session)
         ) {
+          // Clear the cached identity so stale user data is never used.
+          setCurrentUser(null);
           // No session — mark as hydrated so UI stops showing "Syncing".
           useProdStore.setState({ connectionStatus: "offline", isHydrated: true });
         }

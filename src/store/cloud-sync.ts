@@ -49,6 +49,26 @@ type SubtaskRow = {
 
 export { isSupabaseConfigured };
 
+/* --------------------------- cached user identity ------------------------ */
+
+/**
+ * Set by CloudSyncProvider from the onAuthStateChange session event.
+ * Using the event data directly (rather than calling getSession/getUser inside
+ * each data operation) guarantees we always have a valid, non-expired identity
+ * without an extra network round-trip or cookie-read timing issue.
+ */
+let _cachedUserId: string | null = null;
+let _cachedUserEmail: string | undefined = undefined;
+
+/** Called by CloudSyncProvider whenever the auth state changes. */
+export function setCurrentUser(
+  userId: string | null,
+  email?: string | null
+): void {
+  _cachedUserId = userId;
+  _cachedUserEmail = email ?? undefined;
+}
+
 /* ----------------------------- error helpers ----------------------------- */
 
 /**
@@ -103,16 +123,13 @@ function withTimeout<T>(operation: PromiseLike<T>, label: string, ms = CLOUD_TIM
 /* ------------------------------- auth helper ----------------------------- */
 
 /**
- * Returns the signed-in user's id from the local session cache, or `null`
- * when there is no active session.
- *
- * Uses `getSession()` (reads from localStorage — no network round-trip) rather
- * than `getUser()` (validates token against the Supabase Auth API — one extra
- * RTT that can timeout under cold-start conditions and silently cause pullTasks
- * to return null). The JWT is already validated by the onAuthStateChange event
- * that triggered this call; RLS enforces server-side auth on every query.
+ * Returns the signed-in user's id. Prefers the in-process cache set by
+ * setCurrentUser() (zero network cost) and falls back to getSession() only
+ * when no cached id is available (e.g. a forceSync called before the first
+ * auth event). Never hits the Auth API — RLS enforces auth server-side.
  */
 async function getUserId(supabase: SupabaseClient): Promise<string | null> {
+  if (_cachedUserId) return _cachedUserId;
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id ?? null;
 }
@@ -231,18 +248,14 @@ export async function pullTasks(): Promise<Task[] | null> {
 /* --------------------------------- push ---------------------------------- */
 
 /**
- * Ensures the signed-in user's `users` row exists before writing tasks. The
- * auth trigger normally creates it, but this is a safe belt-and-braces upsert.
+ * Upserts the signed-in user's `public.users` row (the FK anchor for tasks).
+ * Prefer calling with explicit `userId`/`email` from the auth event — that
+ * avoids any network call. When called without args (e.g. from forceSync) it
+ * falls back to the in-process cache and then to getSession().
  *
- * Accepts the already-confirmed `userId` and `email` from an `onAuthStateChange`
- * event to avoid an extra `getUser()` round-trip and to guarantee we only run
- * after Supabase has fully established the session (Fix: race-condition guard).
- * Falls back to `getUser()` when called without arguments (e.g. from forceSync).
- */
-/**
- * Returns `true` when the users row was confirmed to exist (upsert succeeded).
- * Returns `false` on any failure — callers should treat this as a soft offline
- * signal and NOT proceed to pushTasks (FK constraint would reject the write).
+ * Returns `true` when the row was confirmed. Returns `false` on any failure —
+ * callers should NOT proceed to pushTasks when this returns false, because the
+ * FK constraint would reject the write with a 23503 error.
  */
 export async function ensureUserRow(
   userId?: string,
@@ -251,19 +264,19 @@ export async function ensureUserRow(
   const supabase = getSupabaseClient();
   if (!supabase) return false;
   try {
-    let uid = userId;
-    let userEmail = email;
+    // Prefer the explicitly-passed values (cheapest), then the in-process
+    // cache set by setCurrentUser(), then fall back to a session lookup.
+    let uid = userId ?? _cachedUserId ?? null;
+    let userEmail = email ?? _cachedUserEmail;
 
-    // Only hit the network when we weren't given confirmed identity.
     if (!uid) {
       const { data, error: authErr } = await withTimeout(
         supabase.auth.getUser(),
         "get user"
       );
-      // Guard: no session or auth error → silently bail, no DB call made.
       if (authErr || !data.user) return false;
       uid = data.user.id;
-      userEmail = data.user.email;
+      userEmail = data.user.email ?? undefined;
     }
 
     const { error } = await withTimeout(

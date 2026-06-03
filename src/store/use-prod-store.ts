@@ -852,6 +852,17 @@ export const useProdStore = create<ProdState>()(
     if (get().isSyncing) return;
     set({ isSyncing: true, connectionStatus: "connecting" });
     try {
+      // Flush any debounced task edits first so local changes reach the cloud
+      // before we overwrite local state with the pulled cloud copy.
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        const ids = new Set(pendingTaskIds);
+        pendingTaskIds.clear();
+        const pending = get().tasks.filter((t) => ids.has(t.id));
+        if (pending.length > 0) await pushTasks(pending);
+      }
+
       await ensureUserRow();
       const cloudTasks = await pullTasks();
       if (cloudTasks === null) {
