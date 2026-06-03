@@ -33,9 +33,9 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // Register the same recovery-only worker on every host. It deletes older
-  // page caches and then stays network-only, which keeps normal profiles as
-  // close to an incognito load as the platform allows.
+  // Register the inert recovery worker on every host. It deletes caches left by
+  // older worker versions and never intercepts navigations, so a normal profile
+  // loads every page exactly like an incognito window.
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
 
