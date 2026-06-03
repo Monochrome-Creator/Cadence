@@ -48,7 +48,7 @@ jobs:
       # GitHub Pages uses Jekyll, which ignores _next/. The .nojekyll file
       # disables Jekyll so the _next/ static assets are served correctly.
       - name: Disable Jekyll
-        run: touch out/.nojekyll
+        run: mkdir -p out && touch out/.nojekyll
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
