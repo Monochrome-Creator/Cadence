@@ -31,12 +31,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Middleware (proxy.ts) and the server-side auth callback are not
-      # compatible with a static export — remove them before building.
+      # Middleware (proxy.ts), the auth callback, and the AI flashcard Server
+      # Action all require a Node.js server — remove/stub them for static export.
       - name: Remove server-only features
         run: |
           rm -f src/proxy.ts
           rm -rf src/app/auth
+          cat > src/app/flashcards/actions.ts << 'EOF'
+          export async function generateFlashcards(
+            _text: string
+          ): Promise<{ question: string; answer: string }[]> {
+            throw new Error(
+              "AI generation is only available on the Vercel deployment."
+            );
+          }
+          EOF
 
       - name: Build static export
         run: npm run build
