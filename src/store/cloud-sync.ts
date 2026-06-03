@@ -105,10 +105,19 @@ function withTimeout<T>(operation: PromiseLike<T>, label: string, ms = CLOUD_TIM
 
 /* ------------------------------- auth helper ----------------------------- */
 
-/** The signed-in user's id, or `null` when not authenticated. */
+/**
+ * Returns the signed-in user's id from the local session cache, or `null`
+ * when there is no active session.
+ *
+ * Uses `getSession()` (reads from localStorage — no network round-trip) rather
+ * than `getUser()` (validates token against the Supabase Auth API — one extra
+ * RTT that can timeout under cold-start conditions and silently cause pullTasks
+ * to return null). The JWT is already validated by the onAuthStateChange event
+ * that triggered this call; RLS enforces server-side auth on every query.
+ */
 async function getUserId(supabase: SupabaseClient): Promise<string | null> {
-  const { data } = await withTimeout(supabase.auth.getUser(), "get user");
-  return data.user?.id ?? null;
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user.id ?? null;
 }
 
 /* ----------------------------- row <-> model ----------------------------- */

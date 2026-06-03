@@ -47,11 +47,18 @@ export function CloudSyncProvider() {
 
       // 2b. Wait for Supabase to confirm auth state before touching the DB.
       //     `INITIAL_SESSION` fires once on startup (may carry null session).
-      //     `SIGNED_IN` fires when the user logs in during the session.
+      //     `SIGNED_IN` fires when the user explicitly logs in mid-session.
       const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (cancelled) return;
 
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION") && session) {
+          if (event === "SIGNED_IN") {
+            // User just logged in after the app was already open (e.g. came from
+            // the login page). `INITIAL_SESSION` with no session previously set
+            // isHydrated: true, which would cause hydrate() to exit immediately.
+            // Reset it so the full cloud pull runs for the now-authenticated user.
+            useProdStore.setState({ isHydrated: false });
+          }
           // Session confirmed — safe to write the users row and pull cloud data.
           await ensureUserRow(session.user.id, session.user.email ?? undefined);
           void hydrate();
