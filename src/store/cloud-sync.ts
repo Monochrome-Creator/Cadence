@@ -197,23 +197,54 @@ export async function pullTasks(): Promise<Task[] | null> {
 /**
  * Ensures the signed-in user's `users` row exists before writing tasks. The
  * auth trigger normally creates it, but this is a safe belt-and-braces upsert.
+ *
+ * Accepts the already-confirmed `userId` and `email` from an `onAuthStateChange`
+ * event to avoid an extra `getUser()` round-trip and to guarantee we only run
+ * after Supabase has fully established the session (Fix: race-condition guard).
+ * Falls back to `getUser()` when called without arguments (e.g. from forceSync).
  */
-export async function ensureUserRow(): Promise<void> {
+export async function ensureUserRow(
+  userId?: string,
+  email?: string
+): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
   try {
-    const { data } = await withTimeout(supabase.auth.getUser(), "get user");
-    const user = data.user;
-    if (!user) return;
+    let uid = userId;
+    let userEmail = email;
+
+    // Only hit the network when we weren't given confirmed identity.
+    if (!uid) {
+      const { data, error: authErr } = await withTimeout(
+        supabase.auth.getUser(),
+        "get user"
+      );
+      // Guard: no session or auth error → silently bail, no DB call made.
+      if (authErr || !data.user) return;
+      uid = data.user.id;
+      userEmail = data.user.email;
+    }
+
     const { error } = await withTimeout(
       supabase
         .from("users")
-        .upsert({ id: user.id, email: user.email }, { onConflict: "id" }),
+        .upsert({ id: uid, email: userEmail }, { onConflict: "id" }),
       "ensure user"
     );
-    if (error) console.error("[cadence] ensure user failed", error);
+    if (error) {
+      // PostgrestError properties are non-enumerable — serialise explicitly so
+      // the real message, code, and details appear in the console (Fix: logging).
+      console.error(
+        "[cadence] ensure user failed",
+        JSON.stringify(error, Object.getOwnPropertyNames(error))
+      );
+    }
   } catch (error) {
-    console.error("[cadence] ensure user threw", error);
+    const msg =
+      error instanceof Error
+        ? error.message
+        : JSON.stringify(error, Object.getOwnPropertyNames(error as object));
+    console.error("[cadence] ensure user threw", msg);
   }
 }
 

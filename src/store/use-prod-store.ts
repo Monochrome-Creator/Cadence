@@ -797,7 +797,10 @@ export const useProdStore = create<ProdState>()(
     }
     set({ isSyncing: true, connectionStatus: "connecting" });
     try {
-      await ensureUserRow();
+      // ensureUserRow() is intentionally NOT called here.
+      // It runs inside CloudSyncProvider's onAuthStateChange handler, which
+      // fires only after Supabase has confirmed a valid session — eliminating
+      // the startup race where the access token may not yet be ready.
       const cloudTasks = await pullTasks();
       if (cloudTasks === null) {
         // Read failed (offline, signed out, or timeout) — stay on local state
