@@ -12,8 +12,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *
  * NOTE: in Next.js 16, `cookies()` is async and must be awaited. Writing
  * cookies during a Server Component render throws, so `setAll` is wrapped in a
- * try/catch — the auth proxy (`src/proxy.ts`) refreshes the session cookie on
- * every request, so a skipped write here is harmless.
+ * try/catch. Browser-side auth still owns normal session refreshes, so a
+ * skipped write here is harmless.
  *
  * Returns `null` when Supabase env vars are absent, keeping the app usable in a
  * purely local mode without credentials.

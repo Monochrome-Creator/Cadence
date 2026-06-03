@@ -33,44 +33,68 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // On GitHub Pages, register a caching service worker so that Android Chrome
-  // PWA standalone mode can serve pages on refresh (without a SW, standalone
-  // refreshes hit the network cold and fail with "This page couldn't load").
-  // On every other origin (Vercel, localhost) we defensively unregister any
-  // stale worker and wipe caches so the app always loads from the network.
+  // Register the same recovery-only worker on every host. It deletes older
+  // page caches and then stays network-only, which keeps normal profiles as
+  // close to an incognito load as the platform allows.
   useEffect(() => {
-    const isGhPages =
-      typeof window !== "undefined" &&
-      window.location.hostname === "monochrome-creator.github.io";
+    if (!("serviceWorker" in navigator)) return;
 
-    if (isGhPages && "serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/Cadence/sw.js").catch(() => {
-        // Non-fatal — app still works; offline support just won't be available.
+    const basePath =
+      window.location.hostname === "monochrome-creator.github.io"
+        ? "/Cadence"
+        : "";
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloading = false;
+
+    const onControllerChange = () => {
+      // A controller change on an already-controlled client means a stale
+      // worker was replaced. Reload once so the next navigation uses the fixed
+      // worker immediately. Avoid a first-install reload on clean profiles.
+      if (!hadController || reloading) return;
+      reloading = true;
+      window.location.reload();
+    };
+
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      onControllerChange,
+    );
+
+    navigator.serviceWorker
+      .register(`${basePath}/sw.js`, {
+        scope: `${basePath}/`,
+        updateViaCache: "none",
+      })
+      .then((registration) => {
+        registration.waiting?.postMessage({ type: "SKIP_WAITING" });
+
+        registration.addEventListener("updatefound", () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener("statechange", () => {
+            if (
+              installing.state === "installed" &&
+              navigator.serviceWorker.controller
+            ) {
+              installing.postMessage({ type: "SKIP_WAITING" });
+            }
+          });
+        });
+
+        void registration.update().catch(() => {
+          // A failed update check is harmless; the active worker keeps running.
+        });
+      })
+      .catch(() => {
+        // Non-fatal — app still works; offline fallback just won't be available.
       });
-      return;
-    }
 
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker
-        .getRegistrations()
-        .then((registrations) => {
-          for (const registration of registrations) {
-            void registration.unregister();
-          }
-        })
-        .catch(() => {
-          // Best-effort cleanup; failures shouldn't break the app.
-        });
-    }
-
-    if ("caches" in window) {
-      caches
-        .keys()
-        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
-        .catch(() => {
-          // Best-effort cleanup; failures shouldn't break the app.
-        });
-    }
+    return () => {
+      navigator.serviceWorker.removeEventListener(
+        "controllerchange",
+        onControllerChange,
+      );
+    };
   }, []);
 
   useEffect(() => {
