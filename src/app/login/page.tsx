@@ -125,13 +125,13 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Brand mark */}
         <div className="mb-8 flex flex-col items-center text-center">
-          <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-[#f2eadc] font-heading text-2xl font-semibold text-[#a35d4d] shadow-[0_1px_3px_rgba(74,64,54,0.08)]">
+          <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-[var(--c-beige)] font-heading text-2xl font-semibold text-[#a35d4d] shadow-[0_1px_3px_rgba(74,64,54,0.08)]">
             C
           </span>
-          <h1 className="font-heading text-4xl font-semibold tracking-tight text-[#4a4036]">
+          <h1 className="font-heading text-4xl font-semibold tracking-tight text-[var(--c-ink-2)]">
             {mode === "signin" ? "Welcome back" : "Join Cadence"}
           </h1>
-          <p className="mt-2 text-sm text-[#9c8e7c]">
+          <p className="mt-2 text-sm text-[var(--c-dim)]">
             {mode === "signin"
               ? "Sign in to sync your board across every device."
               : "Create an account to keep your focus in flow."}
@@ -139,12 +139,12 @@ export default function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="rounded-3xl border border-[#e8e0d5] bg-white/80 p-6 shadow-[0_8px_30px_rgba(74,64,54,0.07)] backdrop-blur sm:p-8">
+        <div className="rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-6 shadow-[0_8px_30px_rgba(74,64,54,0.07)] backdrop-blur sm:p-8">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <label
                 htmlFor="email"
-                className="px-1 text-xs font-semibold tracking-wide text-[#9c8e7c] uppercase"
+                className="px-1 text-xs font-semibold tracking-wide text-[var(--c-dim)] uppercase"
               >
                 Email
               </label>
@@ -156,7 +156,7 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="h-11 border-[#e0d6c6] bg-white text-[#4a4036] shadow-none focus-visible:border-[#a35d4d]"
+                className="h-11 border-[var(--c-line-strong)] bg-[var(--c-panel)] text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
               />
             </div>
 
@@ -164,7 +164,7 @@ export default function LoginPage() {
               <div className="space-y-1.5">
                 <label
                   htmlFor="password"
-                  className="px-1 text-xs font-semibold tracking-wide text-[#9c8e7c] uppercase"
+                  className="px-1 text-xs font-semibold tracking-wide text-[var(--c-dim)] uppercase"
                 >
                   Password
                 </label>
@@ -178,7 +178,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="h-11 border-[#e0d6c6] bg-white text-[#4a4036] shadow-none focus-visible:border-[#a35d4d]"
+                  className="h-11 border-[var(--c-line-strong)] bg-[var(--c-panel)] text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
                 />
               </div>
             )}
@@ -232,7 +232,7 @@ export default function LoginPage() {
         </div>
 
         {/* Mode switch */}
-        <p className="mt-6 text-center text-sm text-[#9c8e7c]">
+        <p className="mt-6 text-center text-sm text-[var(--c-dim)]">
           {mode === "signin" ? "New to Cadence?" : "Already have an account?"}{" "}
           <button
             type="button"
@@ -247,7 +247,7 @@ export default function LoginPage() {
         </p>
 
         {!isSupabaseConfigured && (
-          <p className="mt-6 rounded-xl bg-[#f2eadc] px-4 py-3 text-center text-xs text-[#8a7d6b]">
+          <p className="mt-6 rounded-xl bg-[var(--c-beige)] px-4 py-3 text-center text-xs text-[#8a7d6b]">
             Cloud sync isn&apos;t set up yet. Add your Supabase keys to{" "}
             <code className="font-mono">.env.local</code> to enable accounts, or{" "}
             <Link href="/" className="font-semibold text-[#a35d4d] underline">

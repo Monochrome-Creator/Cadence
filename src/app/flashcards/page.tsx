@@ -34,21 +34,21 @@ export default function FlashcardsPage() {
     <div className="px-8 py-10">
       <div className="mx-auto max-w-3xl">
         <header className="mb-10">
-          <h1 className="font-heading text-4xl font-semibold tracking-tight text-[#4a4036]">
+          <h1 className="font-heading text-4xl font-semibold tracking-tight text-[var(--c-ink-2)]">
             Flashcards
           </h1>
-          <p className="mt-2 text-sm text-[#9c8e7c]">
+          <p className="mt-2 text-sm text-[var(--c-dim)]">
             Paste your notes and let AI turn them into study cards.
           </p>
         </header>
 
-        <div className="mb-8 rounded-3xl border border-[#e8e0d5] bg-white p-6 shadow-[0_2px_8px_rgba(74,64,54,0.05)]">
+        <div className="mb-8 rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel)] p-6 shadow-[0_2px_8px_rgba(74,64,54,0.05)]">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Paste text, notes, or an article here..."
             rows={8}
-            className="w-full resize-y rounded-2xl border border-[#e8e0d5] bg-[#fdfbf7] p-4 text-sm text-[#4a4036] outline-none focus-visible:border-[#a35d4d] focus-visible:bg-white"
+            className="w-full resize-y rounded-2xl border border-[var(--c-line)] bg-[var(--c-cream)] p-4 text-sm text-[var(--c-ink-2)] outline-none focus-visible:border-[#a35d4d] focus-visible:bg-[var(--c-panel)]"
           />
 
           <div className="mt-4 flex items-center justify-between">
@@ -73,19 +73,19 @@ export default function FlashcardsPage() {
             {flashcards.map((card, index) => (
               <div
                 key={index}
-                className="rounded-2xl border border-[#e8e0d5] bg-white p-5 shadow-[0_2px_8px_rgba(74,64,54,0.05)]"
+                className="rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-5 shadow-[0_2px_8px_rgba(74,64,54,0.05)]"
               >
-                <p className="mb-2 text-sm font-semibold text-[#4a4036]">
+                <p className="mb-2 text-sm font-semibold text-[var(--c-ink-2)]">
                   {card.question}
                 </p>
-                <p className="text-sm text-[#6b5f50]">{card.answer}</p>
+                <p className="text-sm text-[var(--c-ink-3)]">{card.answer}</p>
               </div>
             ))}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[#d8cab8] py-16 text-center">
-            <Layers className="mb-3 size-8 text-[#d8cab8]" />
-            <p className="text-sm text-[#9c8e7c]">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[var(--c-line-strong)] py-16 text-center">
+            <Layers className="mb-3 size-8 text-[var(--c-line-strong)]" />
+            <p className="text-sm text-[var(--c-dim)]">
               Your generated flashcards will appear here.
             </p>
           </div>

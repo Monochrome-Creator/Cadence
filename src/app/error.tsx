@@ -18,19 +18,19 @@ export default function Error({
 
   return (
     <div className="flex min-h-[80vh] items-center justify-center px-8 py-10">
-      <div className="flex max-w-md flex-col items-center rounded-3xl border border-[#e8e0d5] bg-white p-10 text-center shadow-[0_2px_8px_rgba(74,64,54,0.05)]">
-        <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-[#f7eee4] text-[#a35d4d]">
+      <div className="flex max-w-md flex-col items-center rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel)] p-10 text-center shadow-[0_2px_8px_rgba(74,64,54,0.05)]">
+        <div className="mb-5 flex size-14 items-center justify-center rounded-2xl bg-[var(--c-beige-2)] text-[#a35d4d]">
           <TriangleAlert className="size-7" />
         </div>
-        <h2 className="font-heading text-2xl font-semibold text-[#4a4036]">
+        <h2 className="font-heading text-2xl font-semibold text-[var(--c-ink-2)]">
           Something went wrong
         </h2>
-        <p className="mt-2 text-sm text-[#9c8e7c]">
+        <p className="mt-2 text-sm text-[var(--c-dim)]">
           We hit an unexpected snag. You can try again, and if it keeps
           happening, refresh the page.
         </p>
         {(error.message || error.digest) && (
-          <pre className="mt-4 max-h-32 w-full overflow-auto rounded-lg bg-[#f7eee4] px-3 py-2 text-left text-xs break-words whitespace-pre-wrap text-[#8a7d6b]">
+          <pre className="mt-4 max-h-32 w-full overflow-auto rounded-lg bg-[var(--c-beige-2)] px-3 py-2 text-left text-xs break-words whitespace-pre-wrap text-[#8a7d6b]">
             {error.message}
             {error.digest ? `\n(ref: ${error.digest})` : ""}
           </pre>

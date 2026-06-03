@@ -26,7 +26,7 @@ export function ConnectionStatus() {
       role="status"
       aria-live="polite"
       title={label}
-      className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 flex items-center gap-1.5 rounded-full border border-[#e8e0d5] bg-white/80 px-2.5 py-1 text-xs font-medium text-[#6b5f50] shadow-sm backdrop-blur-sm md:right-4 md:top-4"
+      className="fixed right-3 top-[calc(env(safe-area-inset-top)+0.5rem)] z-40 flex items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-2.5 py-1 text-xs font-medium text-[var(--c-ink-3)] shadow-sm backdrop-blur-sm md:right-4 md:top-4"
     >
       <span className="relative flex size-2">
         {pulse && (

@@ -120,22 +120,22 @@ export function PwaInstallPrompt() {
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:bottom-4">
-      <div className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-[#e8e0d5] bg-white p-4 shadow-[0_8px_30px_rgba(74,64,54,0.18)]">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#f7eee4] text-[#a35d4d]">
+      <div className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_8px_30px_rgba(74,64,54,0.18)]">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[var(--c-beige-2)] text-[#a35d4d]">
           <Download className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-heading text-sm font-semibold text-[#4a4036]">
+          <p className="font-heading text-sm font-semibold text-[var(--c-ink-2)]">
             Install Cadence
           </p>
           {isIOS ? (
-            <p className="mt-0.5 flex items-center gap-1 text-xs leading-snug text-[#9c8e7c]">
+            <p className="mt-0.5 flex items-center gap-1 text-xs leading-snug text-[var(--c-dim)]">
               Tap
               <Share className="inline size-3.5 shrink-0" aria-label="Share" />
               then &ldquo;Add to Home Screen&rdquo;.
             </p>
           ) : (
-            <p className="mt-0.5 text-xs leading-snug text-[#9c8e7c]">
+            <p className="mt-0.5 text-xs leading-snug text-[var(--c-dim)]">
               Add it to your home screen for a full-screen, app-like experience.
             </p>
           )}
@@ -153,7 +153,7 @@ export function PwaInstallPrompt() {
           type="button"
           onClick={dismiss}
           aria-label="Dismiss"
-          className="shrink-0 rounded-md p-1.5 text-[#b3a692] transition-colors hover:bg-[#f2eadc] hover:text-[#6b5f50]"
+          className="shrink-0 rounded-md p-1.5 text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-3)]"
         >
           <X className="size-4" />
         </button>

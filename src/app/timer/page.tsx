@@ -11,10 +11,10 @@ export default function TimerPage() {
     <div className="px-6 py-10 md:px-8">
       <div className="mx-auto max-w-md">
         <header className="mb-8 text-center">
-          <h1 className="font-heading text-4xl font-semibold tracking-tight text-[#4a4036]">
+          <h1 className="font-heading text-4xl font-semibold tracking-tight text-[var(--c-ink-2)]">
             Focus Timer
           </h1>
-          <p className="mt-2 text-sm text-[#9c8e7c]">
+          <p className="mt-2 text-sm text-[var(--c-dim)]">
             Work in calm, focused intervals.
           </p>
         </header>

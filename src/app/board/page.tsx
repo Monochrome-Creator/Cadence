@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext,
+  arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -106,7 +107,7 @@ const CATEGORY_THEMES: CategoryTheme[] = [
 /** Neutral treatment for the default/empty "General" bucket — no card tint. */
 const NEUTRAL_THEME: CategoryTheme = {
   pill: "bg-[#efe9e0] text-[#8a7d6b]",
-  spine: "border-l-[#d8cab8]",
+  spine: "border-l-[var(--c-line-strong)]",
   tint: "",
 };
 
@@ -164,7 +165,7 @@ const LEVEL_INDENT: Record<SubtaskLevel, string> = {
 /** Distinct badge tint per nesting depth. */
 const LEVEL_BADGE: Record<SubtaskLevel, string> = {
   L1: "bg-[#a35d4d]/12 text-[#a35d4d]",
-  L2: "bg-[#9c8e7c]/18 text-[#8a7d6b]",
+  L2: "bg-[var(--c-dim)]/18 text-[#8a7d6b]",
   L3: "bg-[#6f9e6a]/18 text-[#5f7d56]",
 };
 
@@ -240,11 +241,11 @@ function DeadlineField({
         type="button"
         onClick={openPicker}
         className={cn(
-          "flex w-full items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-sm transition-colors hover:border-[#e8e0d5]",
-          display ? "text-[#6b5f50]" : "text-[#b3a692]"
+          "flex w-full items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-sm transition-colors hover:border-[var(--c-line)]",
+          display ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
         )}
       >
-        <CalendarDays className="size-3.5 shrink-0 text-[#b3a692]" />
+        <CalendarDays className="size-3.5 shrink-0 text-[var(--c-faint)]" />
         {display || "Set date"}
       </button>
       {/* Native picker drives the value; visually hidden but still focusable. */}
@@ -274,7 +275,7 @@ function SessionStepper({
 }) {
   return (
     <div
-      className="group flex items-center justify-center gap-1 text-sm font-medium text-[#6b5f50]"
+      className="group flex items-center justify-center gap-1 text-sm font-medium text-[var(--c-ink-3)]"
       title={`${value} focus sessions (25 min each) — hover to adjust or click to type`}
     >
       <button
@@ -282,7 +283,7 @@ function SessionStepper({
         aria-label="Decrease sessions"
         disabled={value <= 0}
         onClick={() => onChange(value - 1)}
-        className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#b3a692] opacity-100 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] disabled:pointer-events-none disabled:opacity-30 md:size-5 md:opacity-0 md:group-hover:opacity-100 md:disabled:opacity-0"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] opacity-100 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] disabled:pointer-events-none disabled:opacity-30 md:size-5 md:opacity-0 md:group-hover:opacity-100 md:disabled:opacity-0"
       >
         <Minus className="size-3" />
       </button>
@@ -295,7 +296,7 @@ function SessionStepper({
           value={value}
           aria-label="Pomodoro sessions logged"
           onChange={(e) => onChange(e.target.valueAsNumber || 0)}
-          className="w-7 rounded-md border border-transparent bg-transparent px-0.5 py-0.5 text-center tabular-nums transition-colors hover:border-[#e8e0d5] focus-visible:border-[#a35d4d] focus-visible:bg-white focus-visible:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-7 rounded-md border border-transparent bg-transparent px-0.5 py-0.5 text-center tabular-nums transition-colors hover:border-[var(--c-line)] focus-visible:border-[#a35d4d] focus-visible:bg-[var(--c-panel)] focus-visible:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
       </span>
 
@@ -303,7 +304,7 @@ function SessionStepper({
         type="button"
         aria-label="Increase sessions"
         onClick={() => onChange(value + 1)}
-        className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#b3a692] opacity-100 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] md:size-5 md:opacity-0 md:group-hover:opacity-100"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] opacity-100 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] md:size-5 md:opacity-0 md:group-hover:opacity-100"
       >
         <Plus className="size-3" />
       </button>
@@ -340,12 +341,12 @@ function MicroTaskPanel({ task }: { task: Task }) {
   };
 
   return (
-    <div className="border-t border-[#efe7da] p-3 md:pl-12">
+    <div className="border-t border-[var(--c-line-2)] p-3 md:pl-12">
       {/* Warmer beige skin wrapping all micro-tasks */}
-      <div className="rounded-xl bg-[#f2eadc] p-3">
+      <div className="rounded-xl bg-[var(--c-beige)] p-3">
         {/* Sub-category — second-level grouping within the task's category. */}
         <label className="mb-3 flex items-center gap-2 px-1">
-          <span className="text-[11px] font-semibold tracking-wide text-[#9c8e7c] uppercase">
+          <span className="text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
             Sub-category
           </span>
           <input
@@ -355,17 +356,17 @@ function MicroTaskPanel({ task }: { task: Task }) {
             }
             placeholder="e.g. Planning, Bug fixes…"
             aria-label="Task sub-category"
-            className="min-w-0 flex-1 rounded-full border border-[#e2d6c2] bg-white/70 px-3 py-1 text-xs font-medium text-[#6b5f50] outline-none transition-colors placeholder:text-[#b3a692] focus:border-[#a35d4d] focus:ring-2 focus:ring-[#a35d4d]/20"
+            className="min-w-0 flex-1 rounded-full border border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] px-3 py-1 text-xs font-medium text-[var(--c-ink-3)] outline-none transition-colors placeholder:text-[var(--c-faint)] focus:border-[#a35d4d] focus:ring-2 focus:ring-[#a35d4d]/20"
           />
         </label>
 
-        <p className="mb-2 px-1 text-[11px] font-semibold tracking-wide text-[#9c8e7c] uppercase">
+        <p className="mb-2 px-1 text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
           Micro-tasks
         </p>
 
         <div className="space-y-1">
           {task.subtasks.length === 0 && (
-            <p className="px-1 py-1 text-xs text-[#b3a692]">
+            <p className="px-1 py-1 text-xs text-[var(--c-faint)]">
               No micro-tasks yet. Break this down below.
             </p>
           )}
@@ -386,11 +387,11 @@ function MicroTaskPanel({ task }: { task: Task }) {
                 {nested && (
                   <span
                     aria-hidden
-                    className="mr-2 w-px shrink-0 self-stretch bg-[#d8cab8]"
+                    className="mr-2 w-px shrink-0 self-stretch bg-[var(--c-line-strong)]"
                   />
                 )}
 
-                <div className="flex flex-1 items-start gap-2 rounded-lg bg-white/60 px-2 py-1.5">
+                <div className="flex flex-1 items-start gap-2 rounded-lg bg-[var(--c-panel-soft)] px-2 py-1.5">
                   <button
                     type="button"
                     aria-label={done ? "Mark as to-do" : "Mark as done"}
@@ -403,7 +404,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
                       "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
                       done
                         ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
-                        : "border-[#d8cab8] text-transparent hover:border-[#a35d4d]"
+                        : "border-[var(--c-line-strong)] text-transparent hover:border-[#a35d4d]"
                     )}
                   >
                     <Check className="size-3" />
@@ -447,8 +448,8 @@ function MicroTaskPanel({ task }: { task: Task }) {
                     placeholder="Micro-task…"
                     rows={1}
                     className={cn(
-                      "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition-colors hover:border-[#e8e0d5] focus:border-[#a35d4d] focus:bg-white",
-                      done ? "text-[#b3a692] line-through" : "text-[#4a4036]"
+                      "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] focus:bg-[var(--c-panel)]",
+                      done ? "text-[var(--c-faint)] line-through" : "text-[var(--c-ink-2)]"
                     )}
                   />
 
@@ -458,7 +459,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
                     onClick={() => insertChild(subtask.id, subtask.level)}
                     title={`Add ${DEEPER_LEVEL[subtask.level]} below`}
                     aria-label={`Add ${DEEPER_LEVEL[subtask.level]} micro-task below`}
-                    className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[#b3a692] opacity-0 transition-all hover:bg-[#f2eadc] hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100"
+                    className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100"
                   >
                     <Plus className="size-3.5" />
                   </button>
@@ -474,7 +475,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
           <div
             role="group"
             aria-label="Micro-task depth"
-            className="flex shrink-0 items-center gap-0.5 rounded-full border border-[#e0d6c6] bg-white/70 p-0.5"
+            className="flex shrink-0 items-center gap-0.5 rounded-full border border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] p-0.5"
           >
             {SUBTASK_LEVELS.map((level) => (
               <button
@@ -487,7 +488,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
                   "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
                   newLevel === level
                     ? "bg-[#a35d4d] text-white shadow-[0_1px_2px_rgba(74,64,54,0.18)]"
-                    : "text-[#9c8e7c] hover:text-[#a35d4d]"
+                    : "text-[var(--c-dim)] hover:text-[#a35d4d]"
                 )}
               >
                 {level}
@@ -501,7 +502,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
               if (e.key === "Enter") commitSubtask();
             }}
             placeholder={`New ${newLevel} micro-task…`}
-            className="h-8 min-w-0 flex-1 border-[#e0d6c6] bg-white/80 text-sm text-[#4a4036] shadow-none focus-visible:border-[#a35d4d]"
+            className="h-8 min-w-0 flex-1 border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] text-sm text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
           />
           <Button
             size="sm"
@@ -575,9 +576,11 @@ function SortableTaskCard({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "rounded-xl border border-l-4 border-[#e8e0d5] bg-white/80 shadow-[0_1px_4px_rgba(74,64,54,0.04)] transition-shadow hover:shadow-[0_4px_14px_rgba(74,64,54,0.07)]",
+        "rounded-xl border border-l-4 border-[var(--c-line)] bg-[var(--c-panel-soft)] shadow-[0_1px_4px_rgba(74,64,54,0.04)] transition-shadow hover:shadow-[0_4px_14px_rgba(74,64,54,0.07)]",
         theme.spine,
         theme.tint,
+        // Dark mode flattens the pale category tints to a single warm panel.
+        "dark:bg-[var(--c-panel)]",
         isActive && "border-[#a35d4d]/40 ring-2 ring-[#a35d4d]/25",
         // The original collapses to a faint placeholder while the overlay floats.
         isDragging && "opacity-40"
@@ -599,9 +602,9 @@ function SortableTaskCard({
             aria-label="Drag to reorder"
             disabled={!dragEnabled}
             className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded-md text-[#c4b8a5] transition-colors",
+              "flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-line-strong)] transition-colors",
               dragEnabled
-                ? "cursor-grab hover:bg-[#f2eadc] hover:text-[#9c8e7c] active:cursor-grabbing"
+                ? "cursor-grab hover:bg-[var(--c-beige)] hover:text-[var(--c-dim)] active:cursor-grabbing"
                 : "cursor-not-allowed opacity-30"
             )}
             title={
@@ -619,7 +622,7 @@ function SortableTaskCard({
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
             aria-label={expanded ? "Collapse micro-tasks" : "Expand micro-tasks"}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-[#9c8e7c] transition-colors hover:bg-[#f2eadc] hover:text-[#a35d4d]"
+            className="flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
           >
             <ChevronRight
               className={cn(
@@ -637,7 +640,7 @@ function SortableTaskCard({
               "flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
               isActive
                 ? "bg-[#a35d4d] text-white"
-                : "bg-[#f2eadc] text-[#9c8e7c] hover:bg-[#f7eee4] hover:text-[#a35d4d]"
+                : "bg-[var(--c-beige)] text-[var(--c-dim)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
             )}
           >
             <Target className="size-3.5" />
@@ -653,11 +656,11 @@ function SortableTaskCard({
                 onChange={(e) => updateTask(task.id, { title: e.target.value })}
                 placeholder="Untitled task"
                 rows={1}
-                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words text-[#4a4036] outline-none transition-colors hover:border-[#e8e0d5] focus:border-[#a35d4d] md:text-sm"
+                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words text-[var(--c-ink-2)] outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] md:text-sm"
               />
 
               {task.subtasks.length > 0 && (
-                <span className="shrink-0 rounded-full bg-[#f2eadc] px-2 py-0.5 text-[11px] font-medium text-[#9c8e7c]">
+                <span className="shrink-0 rounded-full bg-[var(--c-beige)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]">
                   {doneCount}/{task.subtasks.length}
                 </span>
               )}
@@ -666,9 +669,9 @@ function SortableTaskCard({
             {task.subcategory.trim() && (
               <span
                 title={`Sub-category: ${task.subcategory}`}
-                className="ml-2 inline-flex max-w-full items-center gap-1 self-start truncate rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-medium text-[#9c8e7c]"
+                className="ml-2 inline-flex max-w-full items-center gap-1 self-start truncate rounded-full bg-[var(--c-panel-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]"
               >
-                <CornerDownRight className="size-3 shrink-0 text-[#b3a692]" />
+                <CornerDownRight className="size-3 shrink-0 text-[var(--c-faint)]" />
                 {task.subcategory}
               </span>
             )}
@@ -730,7 +733,7 @@ function SortableTaskCard({
           placeholder="Category"
           aria-label="Task category"
           className={cn(
-            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[#b3a692] focus:ring-2 focus:ring-[#a35d4d]/25 md:col-auto md:w-full md:py-1",
+            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[var(--c-faint)] focus:ring-2 focus:ring-[#a35d4d]/25 md:col-auto md:w-full md:py-1",
             theme.pill
           )}
         />
@@ -765,7 +768,7 @@ function SortableTaskCard({
                   "size-10 w-10 shrink-0 justify-center gap-0 rounded-full border-0 p-0 shadow-none md:size-8 md:w-8 [&>svg:last-child]:hidden",
                   task.recurrence !== "none"
                     ? "bg-[#f6e6da] text-[#a35d4d]"
-                    : "bg-transparent text-[#b3a692] hover:bg-[#f2eadc] hover:text-[#a35d4d]"
+                    : "bg-transparent text-[var(--c-faint)] hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
                 )}
               >
                 <Repeat className="size-4" />
@@ -783,7 +786,7 @@ function SortableTaskCard({
               type="button"
               title="Delete task"
               onClick={() => deleteTask(task.id)}
-              className="flex size-10 items-center justify-center rounded-full text-[#b3a692] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b] md:size-8"
+              className="flex size-10 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b] md:size-8"
             >
               <Trash2 className="size-4" />
             </button>
@@ -801,8 +804,8 @@ function SortableTaskCard({
         <div className="overflow-hidden">
           {/* Mobile-only: the Deadline column is hidden in the row on phones,
               so it's surfaced here in the expandable view instead of dropped. */}
-          <div className="border-t border-[#efe7da] px-4 py-3 md:hidden">
-            <p className="mb-1 text-[11px] font-semibold tracking-wide text-[#9c8e7c] uppercase">
+          <div className="border-t border-[var(--c-line-2)] px-4 py-3 md:hidden">
+            <p className="mb-1 text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
               Deadline
             </p>
             <DeadlineField
@@ -830,13 +833,14 @@ function TaskDragOverlayCard({ task }: { task: Task }) {
   return (
     <div
       className={cn(
-        "flex cursor-grabbing items-center gap-3 rounded-xl border border-l-4 border-[#e8e0d5] bg-[#fdfbf7] p-4 shadow-[0_18px_44px_rgba(74,64,54,0.22)]",
+        "flex cursor-grabbing items-center gap-3 rounded-xl border border-l-4 border-[var(--c-line)] bg-[var(--c-cream)] p-4 shadow-[0_18px_44px_rgba(74,64,54,0.22)]",
         theme.spine,
-        theme.tint
+        theme.tint,
+        "dark:bg-[var(--c-panel)]"
       )}
     >
       <GripVertical className="size-4 shrink-0 text-[#a35d4d]" />
-      <span className="flex-1 truncate font-medium text-[#4a4036]">
+      <span className="flex-1 truncate font-medium text-[var(--c-ink-2)]">
         {task.title || "Untitled task"}
       </span>
       {task.category.trim() && (
@@ -866,16 +870,90 @@ function TaskDragOverlayCard({ task }: { task: Task }) {
         {task.priority}
       </span>
       {deadline && (
-        <span className="hidden shrink-0 items-center gap-1.5 text-sm text-[#6b5f50] sm:flex">
-          <CalendarDays className="size-3.5 text-[#b3a692]" />
+        <span className="hidden shrink-0 items-center gap-1.5 text-sm text-[var(--c-ink-3)] sm:flex">
+          <CalendarDays className="size-3.5 text-[var(--c-faint)]" />
           {deadline}
         </span>
       )}
       {task.subtasks.length > 0 && (
-        <span className="shrink-0 rounded-full bg-[#f2eadc] px-2 py-0.5 text-[11px] font-medium text-[#9c8e7c]">
+        <span className="shrink-0 rounded-full bg-[var(--c-beige)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]">
           {doneCount}/{task.subtasks.length}
         </span>
       )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         Sortable category section                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Wraps an entire category section (header + tasks + add-row) in a sortable
+ * container so the whole group can be drag-reordered on the board.
+ *
+ * The drag handle lives inside the section header — the component passes
+ * `dragHandleProps` via a render prop so the handle button can sit precisely
+ * inside the existing header row without a wrapper div between them.
+ */
+function SortableCategorySection({
+  id,
+  dragEnabled,
+  children,
+}: {
+  id: string;
+  dragEnabled: boolean;
+  children: (dragHandleProps: React.HTMLAttributes<HTMLElement>) => ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, data: { type: "section" }, disabled: !dragEnabled });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+      className={cn("relative", isDragging && "opacity-40")}
+    >
+      {children({ ...attributes, ...listeners })}
+    </div>
+  );
+}
+
+/**
+ * Lightweight floating ghost shown while a category section is being dragged.
+ * Mirrors the section header's visual weight without rendering all child cards.
+ */
+function CategoryDragOverlayHeader({
+  category,
+  count,
+}: {
+  category: string;
+  count: number;
+}) {
+  const theme = categoryTheme(category);
+  return (
+    <div className="flex cursor-grabbing items-center gap-3 rounded-xl border border-[var(--c-line)] bg-[var(--c-panel)] px-5 py-3.5 shadow-[0_18px_44px_rgba(74,64,54,0.18)]">
+      <GripVertical className="size-4 shrink-0 text-[#a35d4d]" />
+      <span className="font-heading text-xl font-semibold tracking-tight text-[var(--c-ink-2)]">
+        {category}
+      </span>
+      <span
+        className={cn(
+          "rounded-full px-2.5 py-0.5 text-xs font-semibold tabular-nums",
+          theme.pill
+        )}
+      >
+        {count}
+      </span>
     </div>
   );
 }
@@ -936,6 +1014,7 @@ export default function BoardPage() {
   const addCategory = useProdStore((state) => state.addCategory);
   const renameCategory = useProdStore((state) => state.renameCategory);
   const deleteCategory = useProdStore((state) => state.deleteCategory);
+  const reorderCategories = useProdStore((state) => state.reorderCategories);
   const forceSync = useProdStore((state) => state.forceSync);
 
   // Manual cloud refresh — spins the icon while the round-trip is in flight.
@@ -965,8 +1044,10 @@ export default function BoardPage() {
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
 
-  // Task currently being dragged — drives the floating DragOverlay.
+  // Task currently being dragged — drives the floating task DragOverlay.
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Category section being dragged — drives the floating section DragOverlay.
+  const [draggingCategory, setDraggingCategory] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1050,13 +1131,21 @@ export default function BoardPage() {
   };
 
   const handleDragStart = (event: DragStartEvent) => {
-    setDraggingId(String(event.active.id));
+    if (event.active.data.current?.type === "section") {
+      // Extract the plain category name from the "section:{name}" id.
+      setDraggingCategory(String(event.active.id).replace(/^section:/, ""));
+    } else {
+      setDraggingId(String(event.active.id));
+    }
   };
 
   // Live cross-column transfer: as a card is dragged over a different category,
   // move it into that category right away so the placeholder lands in the right
   // group (and the floating overlay recolors to the new category).
   const handleDragOver = (event: DragOverEvent) => {
+    // Section reorders are handled entirely in dragEnd — no live preview needed.
+    if (event.active.data.current?.type === "section") return;
+
     const { active, over } = event;
     if (!over) return;
     const activeId = String(active.id);
@@ -1075,8 +1164,28 @@ export default function BoardPage() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    setDraggingId(null);
     const { active, over } = event;
+
+    // ── Section reorder ──────────────────────────────────────────────────────
+    if (active.data.current?.type === "section") {
+      setDraggingCategory(null);
+      if (over && active.id !== over.id) {
+        const sectionNames = sections.map(([cat]) => cat);
+        const fromIdx = sectionNames.indexOf(
+          String(active.id).replace(/^section:/, "")
+        );
+        const toIdx = sectionNames.indexOf(
+          String(over.id).replace(/^section:/, "")
+        );
+        if (fromIdx !== -1 && toIdx !== -1) {
+          reorderCategories(arrayMove(sectionNames, fromIdx, toIdx));
+        }
+      }
+      return;
+    }
+
+    // ── Task reorder / move ──────────────────────────────────────────────────
+    setDraggingId(null);
     if (!over) return;
     const activeId = String(active.id);
     const overId = String(over.id);
@@ -1097,7 +1206,10 @@ export default function BoardPage() {
     }
   };
 
-  const handleDragCancel = () => setDraggingId(null);
+  const handleDragCancel = () => {
+    setDraggingId(null);
+    setDraggingCategory(null);
+  };
 
   // Creates a task pre-assigned to the section it was added from, and keeps the
   // input open for rapid entry within that same category.
@@ -1175,10 +1287,10 @@ export default function BoardPage() {
       <div className="mx-auto max-w-5xl">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight text-[#4a4036] md:text-4xl">
+            <h1 className="font-heading text-3xl font-semibold tracking-tight text-[var(--c-ink-2)] md:text-4xl">
               Main Board
             </h1>
-            <p className="mt-2 text-sm text-[#9c8e7c]">
+            <p className="mt-2 text-sm text-[var(--c-dim)]">
               {visibleTasks.length}
               {statusFilter === "all"
                 ? ` ${visibleTasks.length === 1 ? "task" : "tasks"}`
@@ -1195,8 +1307,8 @@ export default function BoardPage() {
               value={statusFilter}
               onValueChange={(value) => setStatusFilter(value as StatusFilter)}
             >
-              <SelectTrigger className="h-9 gap-2 rounded-full border-[#e8e0d5] bg-white/80 px-4 text-sm text-[#6b5f50]">
-                <ListFilter className="size-4 text-[#9c8e7c]" />
+              <SelectTrigger className="h-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)]">
+                <ListFilter className="size-4 text-[var(--c-dim)]" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1213,9 +1325,9 @@ export default function BoardPage() {
               variant="outline"
               onClick={cycleSort}
               className={cn(
-                "h-9 gap-2 rounded-full border-[#e8e0d5] bg-white/80 px-4 text-sm text-[#6b5f50] hover:bg-[#f7eee4] hover:text-[#a35d4d]",
+                "h-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]",
                 sortDirection !== "none" &&
-                  "border-[#a35d4d]/30 bg-[#f7eee4] text-[#a35d4d]"
+                  "border-[#a35d4d]/30 bg-[var(--c-beige-2)] text-[#a35d4d]"
               )}
             >
               {sortDirection === "asc" ? (
@@ -1236,12 +1348,12 @@ export default function BoardPage() {
             >
               <SelectTrigger
                 className={cn(
-                  "h-9 gap-2 rounded-full border-[#e8e0d5] bg-white/80 px-4 text-sm text-[#6b5f50]",
+                  "h-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)]",
                   categorySort !== "none" &&
-                    "border-[#a35d4d]/30 bg-[#f7eee4] text-[#a35d4d]"
+                    "border-[#a35d4d]/30 bg-[var(--c-beige-2)] text-[#a35d4d]"
                 )}
               >
-                <Tags className="size-4 text-[#9c8e7c]" />
+                <Tags className="size-4 text-[var(--c-dim)]" />
                 <SelectValue>
                   {(value) => CATEGORY_SORT_LABELS[value as CategorySort]}
                 </SelectValue>
@@ -1263,7 +1375,7 @@ export default function BoardPage() {
               disabled={isRefreshing}
               title="Refresh from cloud"
               aria-label="Refresh from cloud"
-              className="h-9 min-w-9 gap-2 rounded-full border-[#e8e0d5] bg-white/80 px-4 text-sm text-[#6b5f50] hover:bg-[#f7eee4] hover:text-[#a35d4d]"
+              className="h-9 min-w-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
             >
               <RefreshCw
                 className={cn("size-4", isRefreshing && "animate-spin")}
@@ -1274,7 +1386,7 @@ export default function BoardPage() {
         </header>
 
         {visibleTasks.length === 0 && tasks.length > 0 ? (
-          <div className="rounded-xl border border-dashed border-[#d8cab8] bg-white/50 py-14 text-center text-sm text-[#9c8e7c]">
+          <div className="rounded-xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-14 text-center text-sm text-[var(--c-dim)]">
             No tasks match this filter.
           </div>
         ) : (
@@ -1290,15 +1402,38 @@ export default function BoardPage() {
             onDragEnd={handleDragEnd}
             onDragCancel={handleDragCancel}
           >
+            {/* Outer context: makes entire category sections sortable */}
+            <SortableContext
+              items={sections.map(([cat]) => `section:${cat}`)}
+              strategy={verticalListSortingStrategy}
+            >
             <div className="space-y-12">
               {sections.map(([category, groupTasks]) => {
                 // Color-codes the category header pill to match its card spine.
                 const theme = categoryTheme(category);
                 return (
-                  <section key={category}>
+                  <SortableCategorySection
+                    key={category}
+                    id={`section:${category}`}
+                    dragEnabled={dragEnabled}
+                  >
+                  {(dragHandleProps) => (
+                  <section>
                     {/* Master category header — bold serif name + count pill,
                         with inline rename + delete (General is protected). */}
                     <div className="group/header mb-4 flex items-center gap-3">
+                      {/* Section drag handle — only shown when manual ordering is active */}
+                      {dragEnabled && (
+                        <button
+                          type="button"
+                          {...dragHandleProps}
+                          title="Drag to reorder section"
+                          aria-label={`Drag ${category} section to reorder`}
+                          className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-dim)] active:cursor-grabbing"
+                        >
+                          <GripVertical className="size-4" />
+                        </button>
+                      )}
                       {editingCategory === category ? (
                         <input
                           autoFocus
@@ -1310,10 +1445,10 @@ export default function BoardPage() {
                             if (e.key === "Escape") cancelRename();
                           }}
                           aria-label={`Rename ${category}`}
-                          className="font-heading w-64 max-w-full rounded-md border border-[#a35d4d]/40 bg-white px-2 py-0.5 text-2xl font-semibold tracking-tight text-[#4a4036] outline-none focus:ring-2 focus:ring-[#a35d4d]/20"
+                          className="font-heading w-64 max-w-full rounded-md border border-[#a35d4d]/40 bg-[var(--c-panel)] px-2 py-0.5 text-2xl font-semibold tracking-tight text-[var(--c-ink-2)] outline-none focus:ring-2 focus:ring-[#a35d4d]/20"
                         />
                       ) : (
-                        <h2 className="font-heading text-2xl font-semibold tracking-tight text-[#4a4036]">
+                        <h2 className="font-heading text-2xl font-semibold tracking-tight text-[var(--c-ink-2)]">
                           {category}
                         </h2>
                       )}
@@ -1334,7 +1469,7 @@ export default function BoardPage() {
                             onClick={() => startRename(category)}
                             title="Rename category"
                             aria-label={`Rename ${category}`}
-                            className="flex size-7 items-center justify-center rounded-full text-[#b3a692] transition-colors hover:bg-[#f2eadc] hover:text-[#a35d4d]"
+                            className="flex size-7 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
                           >
                             <Pencil className="size-3.5" />
                           </button>
@@ -1345,7 +1480,7 @@ export default function BoardPage() {
                             }
                             title="Delete category"
                             aria-label={`Delete ${category}`}
-                            className="flex size-7 items-center justify-center rounded-full text-[#b3a692] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b]"
+                            className="flex size-7 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b]"
                           >
                             <Trash2 className="size-3.5" />
                           </button>
@@ -1356,7 +1491,7 @@ export default function BoardPage() {
                     {/* Column labels (md and up) */}
                     <div
                       className={cn(
-                        "mb-3 hidden border border-l-4 border-transparent px-4 text-xs font-semibold tracking-wide text-[#b3a692] uppercase md:grid md:items-center md:gap-4",
+                        "mb-3 hidden border border-l-4 border-transparent px-4 text-xs font-semibold tracking-wide text-[var(--c-faint)] uppercase md:grid md:items-center md:gap-4",
                         GRID_COLS
                       )}
                     >
@@ -1386,7 +1521,7 @@ export default function BoardPage() {
                           ))
                         ) : (
                           // Keeps an empty column visible and a valid drop target.
-                          <div className="rounded-xl border-2 border-dashed border-[#e2d6c2] bg-white/30 py-8 text-center text-sm text-[#b3a692]">
+                          <div className="rounded-xl border-2 border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-8 text-center text-sm text-[var(--c-faint)]">
                             No tasks here yet — drag one over or add below.
                           </div>
                         )}
@@ -1396,7 +1531,7 @@ export default function BoardPage() {
                     {/* Add Task — scoped to this category */}
                     <div className="mt-4">
                       {addingCategory === category ? (
-                      <div className="flex items-center gap-3 rounded-xl border border-[#a35d4d]/30 bg-white p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
+                      <div className="flex items-center gap-3 rounded-xl border border-[#a35d4d]/30 bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
                         <Plus className="size-5 shrink-0 text-[#a35d4d]" />
                         <Input
                           autoFocus
@@ -1407,7 +1542,7 @@ export default function BoardPage() {
                             if (e.key === "Escape") cancelAdding();
                           }}
                           placeholder={`Add to ${category} — press Enter`}
-                          className="border-transparent bg-transparent text-[#4a4036] shadow-none focus-visible:border-[#a35d4d]"
+                          className="border-transparent bg-transparent text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
                         />
                         <Button
                           onClick={() => commitNewTask(category)}
@@ -1420,7 +1555,7 @@ export default function BoardPage() {
                           type="button"
                           title="Cancel"
                           onClick={cancelAdding}
-                          className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#9c8e7c] transition-colors hover:bg-[#f2eadc] hover:text-[#4a4036]"
+                          className="flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-2)]"
                         >
                           <X className="size-4" />
                         </button>
@@ -1429,22 +1564,25 @@ export default function BoardPage() {
                       <button
                         type="button"
                         onClick={() => startAdding(category)}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#d8cab8] bg-white/40 py-4 text-sm font-medium text-[#9c8e7c] transition-colors hover:border-[#a35d4d]/50 hover:bg-[#f7eee4] hover:text-[#a35d4d]"
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-4 text-sm font-medium text-[var(--c-dim)] transition-colors hover:border-[#a35d4d]/50 hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
                       >
                         <Plus className="size-4" />
                         Add Task
                       </button>
                     )}
                   </div>
-                </section>
-              );
-            })}
+                  </section>
+                  )}
+                  </SortableCategorySection>
+                );
+              })}
             </div>
+            </SortableContext>
 
             {/* New Category — board-level composer for creating a column directly */}
             <div className="mt-12">
               {creatingCategory ? (
-                <div className="flex items-center gap-3 rounded-xl border border-[#a35d4d]/30 bg-white p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
+                <div className="flex items-center gap-3 rounded-xl border border-[#a35d4d]/30 bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
                   <FolderPlus className="size-5 shrink-0 text-[#a35d4d]" />
                   <Input
                     autoFocus
@@ -1455,7 +1593,7 @@ export default function BoardPage() {
                       if (e.key === "Escape") cancelNewCategory();
                     }}
                     placeholder="New category name — press Enter"
-                    className="border-transparent bg-transparent text-[#4a4036] shadow-none focus-visible:border-[#a35d4d]"
+                    className="border-transparent bg-transparent text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
                   />
                   <Button
                     onClick={commitNewCategory}
@@ -1468,7 +1606,7 @@ export default function BoardPage() {
                     type="button"
                     title="Cancel"
                     onClick={cancelNewCategory}
-                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-[#9c8e7c] transition-colors hover:bg-[#f2eadc] hover:text-[#4a4036]"
+                    className="flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-2)]"
                   >
                     <X className="size-4" />
                   </button>
@@ -1477,7 +1615,7 @@ export default function BoardPage() {
                 <button
                   type="button"
                   onClick={() => setCreatingCategory(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#d8cab8] bg-white/40 py-4 text-sm font-semibold text-[#9c8e7c] transition-colors hover:border-[#a35d4d]/50 hover:bg-[#f7eee4] hover:text-[#a35d4d]"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-4 text-sm font-semibold text-[var(--c-dim)] transition-colors hover:border-[#a35d4d]/50 hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
                 >
                   <FolderPlus className="size-4" />
                   New Category
@@ -1485,10 +1623,16 @@ export default function BoardPage() {
               )}
             </div>
 
-            {/* Single floating beige card that follows the cursor while dragging,
-                recoloring to the target category as the task crosses columns. */}
+            {/* Floating overlay: shows a task card or a category header ghost. */}
             <DragOverlay dropAnimation={{ duration: 220, easing: "ease" }}>
-              {draggingTask ? <TaskDragOverlayCard task={draggingTask} /> : null}
+              {draggingTask ? (
+                <TaskDragOverlayCard task={draggingTask} />
+              ) : draggingCategory ? (
+                <CategoryDragOverlayHeader
+                  category={draggingCategory}
+                  count={sections.find(([c]) => c === draggingCategory)?.[1].length ?? 0}
+                />
+              ) : null}
             </DragOverlay>
           </DndContext>
         )}

@@ -52,8 +52,17 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="flex min-h-full overflow-x-clip bg-[#fdfbf7] p-2 text-[#3a322a] md:p-3">
+      <head>
+        {/* Set the theme class before paint to avoid a light→dark flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{if(localStorage.getItem('cadence-theme')==='dark'){document.documentElement.classList.add('dark')}}catch(e){}})();`,
+          }}
+        />
+      </head>
+      <body className="flex min-h-full overflow-x-clip bg-[var(--c-cream)] p-2 text-[var(--c-ink)] md:p-3">
         <CloudSyncProvider />
         <NotificationManager />
         <ConnectionStatus />

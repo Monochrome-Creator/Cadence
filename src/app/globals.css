@@ -81,6 +81,26 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Warm "Cadence" palette (light). These flip under .dark below. Light values
+     equal the hardcoded hex used across the app, so light mode is unchanged. */
+  --c-cream: #fdfbf7;
+  --c-ink: #3a322a;
+  --c-ink-2: #4a4036;
+  --c-ink-3: #6b5f50;
+  --c-dim: #9c8e7c;
+  --c-faint: #b3a692;
+  --c-beige: #f2eadc;
+  --c-beige-2: #f7eee4;
+  --c-panel: #ffffff;
+  --c-panel-soft: rgba(255, 255, 255, 0.75);
+  --c-line: #e8e0d5;
+  --c-line-2: #efe7da;
+  --c-line-strong: #d8cab8;
+  --c-accent: #a35d4d;
+  --c-accent-strong: #8f4f41;
+  --c-accent-tint: #f6e6da;
+  --c-sage: #6f9e6a;
 }
 
 .dark {
@@ -115,6 +135,31 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /* Warm "Cadence" palette (dark) — mirrors the design's cadStyleFor dark set.
+     Accent terracotta stays constant; surfaces, text and lines flip. */
+  --c-cream: #211c18;
+  --c-ink: #f1e9dd;
+  --c-ink-2: #e7ddcd;
+  --c-ink-3: #c7bba7;
+  --c-dim: #9b8e7c;
+  --c-faint: #7c7060;
+  --c-beige: #2b2521;
+  --c-beige-2: #322b25;
+  --c-panel: #2a2420;
+  --c-panel-soft: rgba(255, 255, 255, 0.035);
+  --c-line: rgba(255, 255, 255, 0.085);
+  --c-line-2: rgba(255, 255, 255, 0.06);
+  --c-line-strong: rgba(255, 255, 255, 0.14);
+  --c-accent: #a35d4d;
+  --c-accent-strong: #b06b5b;
+  --c-accent-tint: #47322b;
+  --c-sage: #8bb083;
+}
+
+/* Warm dark background for the app shell. */
+.dark body {
+  background: var(--c-cream);
 }
 
 @layer base {

@@ -28,17 +28,17 @@ const MODE_THEME: Record<
   focus: {
     button: "bg-[#a35d4d] hover:bg-[#8f4f41]",
     bar: "bg-[#a35d4d]",
-    tab: "bg-white text-[#a35d4d] shadow-[0_1px_3px_rgba(74,64,54,0.08)]",
+    tab: "bg-[var(--c-panel)] text-[#a35d4d] shadow-[0_1px_3px_rgba(74,64,54,0.08)]",
   },
   shortBreak: {
     button: "bg-[#6f9e6a] hover:bg-[#5f8a5a]",
     bar: "bg-[#6f9e6a]",
-    tab: "bg-white text-[#5f8a5a] shadow-[0_1px_3px_rgba(74,64,54,0.08)]",
+    tab: "bg-[var(--c-panel)] text-[#5f8a5a] shadow-[0_1px_3px_rgba(74,64,54,0.08)]",
   },
   longBreak: {
     button: "bg-[#6f9e6a] hover:bg-[#5f8a5a]",
     bar: "bg-[#6f9e6a]",
-    tab: "bg-white text-[#5f8a5a] shadow-[0_1px_3px_rgba(74,64,54,0.08)]",
+    tab: "bg-[var(--c-panel)] text-[#5f8a5a] shadow-[0_1px_3px_rgba(74,64,54,0.08)]",
   },
 };
 
@@ -135,9 +135,9 @@ export function TimerWidget() {
   };
 
   return (
-    <div className="rounded-2xl border border-[#e8e0d5] bg-white p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+    <div className="rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
       {/* Mode tabs */}
-      <div className="mb-3 flex gap-1 rounded-xl bg-[#f7eee4] p-1">
+      <div className="mb-3 flex gap-1 rounded-xl bg-[var(--c-beige-2)] p-1">
         {TIMER_MODES.map((m) => (
           <button
             key={m}
@@ -147,7 +147,7 @@ export function TimerWidget() {
               "flex-1 rounded-lg px-1.5 py-1.5 text-[11px] font-medium transition-all",
               mode === m
                 ? MODE_THEME[m].tab
-                : "text-[#9c8e7c] hover:text-[#6b5f50]"
+                : "text-[var(--c-dim)] hover:text-[var(--c-ink-3)]"
             )}
           >
             {m === "focus" ? "Focus" : m === "shortBreak" ? "Short" : "Long"}
@@ -156,17 +156,17 @@ export function TimerWidget() {
       </div>
 
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-xs font-semibold tracking-wide text-[#9c8e7c] uppercase">
+        <span className="text-xs font-semibold tracking-wide text-[var(--c-dim)] uppercase">
           {TIMER_MODE_LABELS[mode]}
         </span>
-        <span className="text-xs text-[#9c8e7c]">{sessionsCompleted} done</span>
+        <span className="text-xs text-[var(--c-dim)]">{sessionsCompleted} done</span>
       </div>
 
-      <div className="mb-1 text-center font-mono text-4xl font-bold text-[#4a4036] tabular-nums">
+      <div className="mb-1 text-center font-mono text-4xl font-bold text-[var(--c-ink-2)] tabular-nums">
         {formatTime(timeLeft)}
       </div>
 
-      <p className="mb-3 truncate text-center text-xs text-[#9c8e7c]">
+      <p className="mb-3 truncate text-center text-xs text-[var(--c-dim)]">
         {isFocus
           ? activeTask
             ? activeTask.title
@@ -175,12 +175,12 @@ export function TimerWidget() {
       </p>
 
       {prompt && (
-        <p className="mb-3 rounded-lg bg-[#f7eee4] px-3 py-2 text-center text-xs font-medium text-[#a35d4d]">
+        <p className="mb-3 rounded-lg bg-[var(--c-beige-2)] px-3 py-2 text-center text-xs font-medium text-[#a35d4d]">
           {prompt}
         </p>
       )}
 
-      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-[#f2eadc]">
+      <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-[var(--c-beige)]">
         <div
           className={cn(
             "h-full rounded-full transition-all duration-1000 ease-linear",
@@ -214,7 +214,7 @@ export function TimerWidget() {
           size="sm"
           variant="ghost"
           onClick={resetTimer}
-          className="text-[#6b5f50] hover:bg-[#f2eadc] hover:text-[#4a4036]"
+          className="text-[var(--c-ink-3)] hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-2)]"
         >
           <RotateCcw className="size-4" />
         </Button>

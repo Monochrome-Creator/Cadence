@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { addDays, addMonths, addWeeks, format, isValid, parseISO } from "date-fns";
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  format,
+  isValid,
+  parseISO,
+  startOfWeek,
+  subDays,
+} from "date-fns";
 
 import {
   deleteTaskRemote,
@@ -62,6 +71,93 @@ export interface Flashcard {
   answer: string;
 }
 
+/** One day's logged productivity, keyed by local `yyyy-MM-dd` in `history`. */
+export interface DayActivity {
+  /** Completed focus (Pomodoro) sessions that day. */
+  sessions: number;
+  /** Tasks marked Done that day. */
+  tasksDone: number;
+}
+
+/** Derived consistency metrics shown on the home dashboard. */
+export interface HistoryStats {
+  /** Consecutive active days ending today (or yesterday if today is unlogged). */
+  streak: number;
+  /** Longest run of consecutive active days ever recorded. */
+  bestStreak: number;
+  /** Current week Mon→Sun, each a dot state for the streak strip. */
+  days: ("done" | "today" | "off")[];
+  /** Trailing 7-day focus-session counts (oldest → today) for the sparkline. */
+  week: number[];
+}
+
+/** A day counts toward a streak if any focus session or task completion landed. */
+function isDayActive(history: Record<string, DayActivity>, key: string): boolean {
+  const day = history[key];
+  return !!day && (day.sessions > 0 || day.tasksDone > 0);
+}
+
+/** Return a new history with today's `field` incremented by one. */
+function bumpHistory(
+  history: Record<string, DayActivity>,
+  field: keyof DayActivity
+): Record<string, DayActivity> {
+  const key = format(new Date(), "yyyy-MM-dd");
+  const prev = history[key] ?? { sessions: 0, tasksDone: 0 };
+  return { ...history, [key]: { ...prev, [field]: prev[field] + 1 } };
+}
+
+/**
+ * Pure derivation of the dashboard's consistency metrics from the daily log.
+ * Computed in the component (via useMemo) so it always reflects the live date.
+ */
+export function computeHistoryStats(
+  history: Record<string, DayActivity>
+): HistoryStats {
+  const key = (d: Date) => format(d, "yyyy-MM-dd");
+  const today = new Date();
+  const todayKey = key(today);
+
+  // Current streak: walk back from today (or yesterday, so a not-yet-logged
+  // today doesn't reset the count) while each day stays active.
+  let streak = 0;
+  let cursor = isDayActive(history, todayKey) ? today : subDays(today, 1);
+  while (isDayActive(history, key(cursor))) {
+    streak++;
+    cursor = subDays(cursor, 1);
+  }
+
+  // Best streak: longest run of consecutive calendar days in the log.
+  const activeKeys = Object.keys(history)
+    .filter((k) => isDayActive(history, k))
+    .sort();
+  let bestStreak = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const k of activeKeys) {
+    run = prev && key(addDays(parseISO(prev), 1)) === k ? run + 1 : 1;
+    bestStreak = Math.max(bestStreak, run);
+    prev = k;
+  }
+  bestStreak = Math.max(bestStreak, streak);
+
+  // Current-week strip, Monday→Sunday.
+  const weekStart = startOfWeek(today, { weekStartsOn: 1 });
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const k = key(addDays(weekStart, i));
+    if (k === todayKey) return "today" as const;
+    return isDayActive(history, k) ? ("done" as const) : ("off" as const);
+  });
+
+  // Trailing 7-day session sparkline (oldest → today, so the last bar is today).
+  const week = Array.from(
+    { length: 7 },
+    (_, i) => history[key(subDays(today, 6 - i))]?.sessions ?? 0
+  );
+
+  return { streak, bestStreak, days, week };
+}
+
 /**
  * Cloud connection state surfaced by the UI status dot:
  *  - "synced"     — last cloud round-trip succeeded.
@@ -104,6 +200,8 @@ interface ProdState {
   categories: string[];
   flashcards: Flashcard[];
   activeTaskId: string | null;
+  /** Daily productivity log keyed by local `yyyy-MM-dd` — powers the streak. */
+  history: Record<string, DayActivity>;
 
   // Cloud sync
   /** Whether Supabase credentials are present and cloud sync is active. */
@@ -148,6 +246,11 @@ interface ProdState {
   ) => void;
   /** Appends a new category column. Trims, ignores blanks and duplicates. */
   addCategory: (name: string) => void;
+  /**
+   * Replaces the category list with a new ordered array — used by the board's
+   * drag-to-reorder sections feature. Deduplicates and filters blanks.
+   */
+  reorderCategories: (orderedNames: string[]) => void;
   /**
    * Renames a category and re-tags every task that used the old name. No-op for
    * the protected "General" bucket or when the target name already exists.
@@ -368,6 +471,7 @@ export const useProdStore = create<ProdState>()(
   categories: initialCategories,
   flashcards: [],
   activeTaskId: null,
+  history: {},
 
   cloudEnabled: isSupabaseConfigured,
   isHydrated: false,
@@ -407,11 +511,20 @@ export const useProdStore = create<ProdState>()(
     queueTaskPush(get, [newId]);
   },
   updateTask: (id, updates) => {
-    set((state) => ({
-      tasks: state.tasks.map((task) =>
-        task.id === id ? { ...task, ...updates } : task
-      ),
-    }));
+    set((state) => {
+      // Log a completion the first time a task transitions into Done.
+      const becameDone =
+        updates.status === "Done" &&
+        state.tasks.find((t) => t.id === id)?.status !== "Done";
+      return {
+        tasks: state.tasks.map((task) =>
+          task.id === id ? { ...task, ...updates } : task
+        ),
+        history: becameDone
+          ? bumpHistory(state.history, "tasksDone")
+          : state.history,
+      };
+    });
     queueTaskPush(get, [id]);
   },
   updateTaskSessions: (taskId, newSessionCount) => {
@@ -498,6 +611,11 @@ export const useProdStore = create<ProdState>()(
     });
     if (changed) pushCategoriesIfCloud(get);
   },
+  reorderCategories: (orderedNames) => {
+    const unique = [...new Set(orderedNames.filter(Boolean))];
+    set({ categories: unique });
+    pushCategoriesIfCloud(get);
+  },
   renameCategory: (oldName, newName) => {
     const trimmed = newName.trim();
     if (!trimmed || oldName === "General") return;
@@ -549,12 +667,18 @@ export const useProdStore = create<ProdState>()(
     const target = get().tasks.find((t) => t.id === taskId);
     if (!target) return;
 
+    // Only log a completion the first time it crosses into Done.
+    const becameDone = target.status !== "Done";
+
     // A one-off task simply completes — nothing to repeat.
     if (target.recurrence === "none") {
       set((state) => ({
         tasks: state.tasks.map((t) =>
           t.id === taskId ? { ...t, status: "Done" as TaskStatus } : t
         ),
+        history: becameDone
+          ? bumpHistory(state.history, "tasksDone")
+          : state.history,
       }));
       queueTaskPush(get, [taskId]);
       return;
@@ -586,6 +710,9 @@ export const useProdStore = create<ProdState>()(
           ),
           repeated,
         ],
+        history: becameDone
+          ? bumpHistory(state.history, "tasksDone")
+          : state.history,
       };
     });
     queueTaskPush(get, [taskId, newId]);
@@ -806,6 +933,10 @@ export const useProdStore = create<ProdState>()(
         timeLeft: TIMER_DURATIONS[nextMode],
         isRunning: false,
         completions: state.completions + 1,
+        // A completed focus session counts toward today's consistency log.
+        history: wasFocus
+          ? bumpHistory(state.history, "sessions")
+          : state.history,
       };
     });
     // Persist the freshly credited pomodoro count for the focused task.
@@ -826,6 +957,7 @@ export const useProdStore = create<ProdState>()(
         categories: state.categories,
         flashcards: state.flashcards,
         activeTaskId: state.activeTaskId,
+        history: state.history,
       }),
     }
   )
