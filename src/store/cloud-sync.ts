@@ -68,16 +68,13 @@ function isMissingTable(error: unknown): boolean {
 const SCHEMA_HINT =
   "Apply supabase/schema.sql via the Supabase dashboard → SQL Editor to create the required tables.";
 
-/** Timeout for routine data operations (pull/push tasks, categories). */
-const CLOUD_TIMEOUT_MS = 5_000;
-
 /**
- * Longer budget for the `users` row upsert. Supabase Postgres instances can
- * have a cold-start delay of several seconds on first connection after idle
- * (especially on free-tier). We use a separate constant so routine data ops
- * keep the snappy 5 s limit while the one-time session bootstrap is forgiving.
+ * Timeout for all Supabase network calls. 10 s is intentionally generous:
+ * free-tier Postgres instances can take 8–10 s to wake from idle (cold start).
+ * Subsequent warm queries complete in <500 ms, so the extra headroom costs
+ * nothing when the DB is already up.
  */
-const ENSURE_USER_TIMEOUT_MS = 10_000;
+const CLOUD_TIMEOUT_MS = 10_000;
 
 /**
  * Mobile networks can leave fetches pending for a long time without rejecting.
@@ -242,12 +239,17 @@ export async function pullTasks(): Promise<Task[] | null> {
  * after Supabase has fully established the session (Fix: race-condition guard).
  * Falls back to `getUser()` when called without arguments (e.g. from forceSync).
  */
+/**
+ * Returns `true` when the users row was confirmed to exist (upsert succeeded).
+ * Returns `false` on any failure — callers should treat this as a soft offline
+ * signal and NOT proceed to pushTasks (FK constraint would reject the write).
+ */
 export async function ensureUserRow(
   userId?: string,
   email?: string
-): Promise<void> {
+): Promise<boolean> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return false;
   try {
     let uid = userId;
     let userEmail = email;
@@ -259,7 +261,7 @@ export async function ensureUserRow(
         "get user"
       );
       // Guard: no session or auth error → silently bail, no DB call made.
-      if (authErr || !data.user) return;
+      if (authErr || !data.user) return false;
       uid = data.user.id;
       userEmail = data.user.email;
     }
@@ -268,8 +270,7 @@ export async function ensureUserRow(
       supabase
         .from("users")
         .upsert({ id: uid, email: userEmail }, { onConflict: "id" }),
-      "ensure user",
-      ENSURE_USER_TIMEOUT_MS
+      "ensure user"
     );
     if (error) {
       if (isMissingTable(error)) {
@@ -282,16 +283,15 @@ export async function ensureUserRow(
           JSON.stringify(error, Object.getOwnPropertyNames(error))
         );
       }
+      return false;
     }
+    return true;
   } catch (error) {
     const isTimeout =
       error instanceof Error && error.message.includes("timed out");
-
     if (isTimeout) {
-      // Cold-start delay on a serverless Postgres instance. The app continues
-      // in local-first mode — hydrate() will pull tasks if/when the DB wakes.
       console.warn(
-        "[cadence] Cloud sync delayed due to cold start — continuing in local-first mode"
+        "[cadence] Cloud sync delayed due to cold start — will retry shortly"
       );
     } else {
       const msg =
@@ -300,7 +300,7 @@ export async function ensureUserRow(
           : JSON.stringify(error, Object.getOwnPropertyNames(error as object));
       console.error("[cadence] ensure user threw", msg);
     }
-    // Always return cleanly so the caller can still attempt hydrate().
+    return false;
   }
 }
 

@@ -59,9 +59,25 @@ export function CloudSyncProvider() {
             // Reset it so the full cloud pull runs for the now-authenticated user.
             useProdStore.setState({ isHydrated: false });
           }
-          // Session confirmed — safe to write the users row and pull cloud data.
+
+          // Session confirmed — write the users row then pull cloud data.
+          // ensureUserRow returns false on cold-start timeout or DB error;
+          // hydrate() will still run (it only reads) but we guard push separately.
           await ensureUserRow(session.user.id, session.user.email ?? undefined);
-          void hydrate();
+          await hydrate();
+
+          // If the DB was cold and the first sync attempt failed, schedule one
+          // automatic retry after a short pause to let Postgres finish waking up.
+          // forceSync() calls ensureUserRow() + pullTasks() + pushTasks() again.
+          if (
+            !cancelled &&
+            useProdStore.getState().connectionStatus === "offline"
+          ) {
+            setTimeout(
+              () => void useProdStore.getState().forceSync(),
+              6_000
+            );
+          }
         } else if (
           event === "SIGNED_OUT" ||
           (event === "INITIAL_SESSION" && !session)

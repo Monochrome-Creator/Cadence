@@ -811,9 +811,15 @@ export const useProdStore = create<ProdState>()(
       if (cloudTasks.length > 0) {
         // Cloud is the source of truth on subsequent devices/sessions.
         set({ tasks: cloudTasks });
-      } else {
-        // First run: seed the cloud with whatever is currently local.
-        await pushTasks(get().tasks);
+      } else if (get().tasks.length > 0) {
+        // First run with local tasks: seed the cloud. If this fails (e.g.
+        // users FK row not yet created), report offline so the user knows
+        // their tasks haven't been synced yet — don't show a false "Synced".
+        const ok = await pushTasks(get().tasks);
+        if (!ok) {
+          set({ connectionStatus: "offline" });
+          return;
+        }
       }
 
       // Managed category list: adopt the cloud copy, or seed it on first run.
@@ -856,9 +862,13 @@ export const useProdStore = create<ProdState>()(
       if (cloudTasks.length > 0) {
         // Adopt the cloud copy (persist middleware writes it to localStorage).
         set({ tasks: cloudTasks });
-      } else {
+      } else if (get().tasks.length > 0) {
         // Cloud is empty — seed it from local so nothing is lost.
-        await pushTasks(get().tasks);
+        const ok = await pushTasks(get().tasks);
+        if (!ok) {
+          set({ connectionStatus: "offline" });
+          return;
+        }
       }
       const cloudCategories = await pullCategories();
       if (cloudCategories && cloudCategories.length > 0) {
