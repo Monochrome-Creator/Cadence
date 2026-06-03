@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 
 // basePath is /omniprod on GitHub Pages, empty on Vercel.
-const base = process.env.GITHUB_PAGES === "true" ? "/omniprod" : "";
+const base = process.env.GITHUB_PAGES === "true" ? "/Cadence" : "";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {

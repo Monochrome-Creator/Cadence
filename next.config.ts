@@ -7,7 +7,7 @@ const isGhPages = process.env.GITHUB_PAGES === "true";
 const nextConfig: NextConfig = {
   ...(isGhPages && {
     output: "export",
-    basePath: "/omniprod",
+    basePath: "/Cadence",
     trailingSlash: true,
     images: { unoptimized: true },
   }),
