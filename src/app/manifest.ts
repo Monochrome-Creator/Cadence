@@ -1,6 +1,9 @@
 import type { MetadataRoute } from "next";
 
-// basePath is /omniprod on GitHub Pages, empty on Vercel.
+// Required for Next.js static export (output: 'export').
+export const dynamic = "force-static";
+
+// basePath is /Cadence on GitHub Pages, empty on Vercel.
 const base = process.env.GITHUB_PAGES === "true" ? "/Cadence" : "";
 
 export default function manifest(): MetadataRoute.Manifest {
