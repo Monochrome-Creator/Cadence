@@ -49,6 +49,25 @@ type SubtaskRow = {
 
 export { isSupabaseConfigured };
 
+/* ----------------------------- error helpers ----------------------------- */
+
+/**
+ * PostgREST code PGRST205 means the table doesn't exist in the schema cache —
+ * i.e. `supabase/schema.sql` has not been applied to this project yet. This is
+ * a setup issue, not a runtime bug, so we downgrade it from error to warn and
+ * print a clear action for the developer to take.
+ */
+function isMissingTable(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as Record<string, unknown>).code === "PGRST205"
+  );
+}
+
+const SCHEMA_HINT =
+  "Apply supabase/schema.sql via the Supabase dashboard → SQL Editor to create the required tables.";
+
 /** Timeout for routine data operations (pull/push tasks, categories). */
 const CLOUD_TIMEOUT_MS = 5_000;
 
@@ -178,10 +197,12 @@ export async function pullTasks(): Promise<Task[] | null> {
     ]);
 
     if (taskRes.error || subtaskRes.error) {
-      console.error(
-        "[cadence] cloud pull failed",
-        taskRes.error ?? subtaskRes.error
-      );
+      const err = taskRes.error ?? subtaskRes.error;
+      if (isMissingTable(err)) {
+        console.warn("[cadence] tasks/subtasks tables not found —", SCHEMA_HINT);
+      } else {
+        console.error("[cadence] cloud pull failed", err);
+      }
       return null;
     }
 
@@ -242,12 +263,16 @@ export async function ensureUserRow(
       ENSURE_USER_TIMEOUT_MS
     );
     if (error) {
-      // PostgrestError properties are non-enumerable — serialise explicitly so
-      // the real message, code, and details appear in the console (Fix: logging).
-      console.error(
-        "[cadence] ensure user failed",
-        JSON.stringify(error, Object.getOwnPropertyNames(error))
-      );
+      if (isMissingTable(error)) {
+        console.warn("[cadence] users table not found —", SCHEMA_HINT);
+      } else {
+        // PostgrestError properties are non-enumerable — serialise explicitly so
+        // the real message, code, and details appear in the console.
+        console.error(
+          "[cadence] ensure user failed",
+          JSON.stringify(error, Object.getOwnPropertyNames(error))
+        );
+      }
     }
   } catch (error) {
     const isTimeout =
@@ -290,7 +315,11 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
       "push tasks"
     );
     if (taskErr) {
-      console.error("[cadence] push tasks failed", taskErr);
+      if (isMissingTable(taskErr)) {
+        console.warn("[cadence] tasks table not found —", SCHEMA_HINT);
+      } else {
+        console.error("[cadence] push tasks failed", taskErr);
+      }
       return false;
     }
 
@@ -307,7 +336,9 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
         "push subtasks"
       );
       if (subErr) {
-        console.error("[cadence] push subtasks failed", subErr);
+        if (!isMissingTable(subErr)) {
+          console.error("[cadence] push subtasks failed", subErr);
+        }
         ok = false;
       }
     }
@@ -326,7 +357,9 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
           )
         : await withTimeout(query, "prune subtasks");
       if (delErr) {
-        console.error("[cadence] prune subtasks failed", delErr);
+        if (!isMissingTable(delErr)) {
+          console.error("[cadence] prune subtasks failed", delErr);
+        }
         ok = false;
       }
     }
@@ -356,7 +389,9 @@ export async function pullCategories(): Promise<string[] | null> {
       "pull categories"
     );
     if (error) {
-      console.error("[cadence] pull categories failed", error);
+      if (!isMissingTable(error)) {
+        console.error("[cadence] pull categories failed", error);
+      }
       return null;
     }
     return ((data?.categories as string[] | null) ?? []);
@@ -377,7 +412,9 @@ export async function pushCategories(categories: string[]): Promise<void> {
       supabase.from("users").update({ categories }).eq("id", userId),
       "push categories"
     );
-    if (error) console.error("[cadence] push categories failed", error);
+    if (error && !isMissingTable(error)) {
+      console.error("[cadence] push categories failed", error);
+    }
   } catch (error) {
     console.error("[cadence] push categories threw", error);
   }
@@ -396,7 +433,9 @@ export async function deleteTaskRemote(taskId: string): Promise<boolean> {
       "delete task"
     );
     if (error) {
-      console.error("[cadence] delete task failed", error);
+      if (!isMissingTable(error)) {
+        console.error("[cadence] delete task failed", error);
+      }
       return false;
     }
     return true;
