@@ -1,42 +1,28 @@
 import type { NextConfig } from "next";
 
+// When building for GitHub Pages (GITHUB_PAGES=true in the Actions workflow),
+// export a fully-static site with the repo name as the base path.
+const isGhPages = process.env.GITHUB_PAGES === "true";
+
 const nextConfig: NextConfig = {
+  ...(isGhPages && {
+    output: "export",
+    basePath: "/omniprod",
+    trailingSlash: true,
+    images: { unoptimized: true },
+  }),
   async headers() {
     return [
       {
-        // Never cache the service worker so clients always pick up new versions.
-        source: "/sw.js",
-        headers: [
-          {
-            key: "Content-Type",
-            value: "application/javascript; charset=utf-8",
-          },
-          {
-            key: "Cache-Control",
-            value: "no-cache, no-store, must-revalidate",
-          },
-        ],
-      },
-      {
-        // The worker owns the offline copy. Revalidate the source when a new
-        // worker installs so recovery UI can change between deployments.
         source: "/offline.html",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "no-cache, must-revalidate",
-          },
-        ],
+        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
       },
       {
         source: "/(.*)",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
-          {
-            key: "Referrer-Policy",
-            value: "strict-origin-when-cross-origin",
-          },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         ],
       },
     ];

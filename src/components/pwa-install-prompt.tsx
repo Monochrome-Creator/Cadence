@@ -33,14 +33,9 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // We intentionally DO NOT register a service worker. Earlier versions
-  // intercepted navigations and, on iOS, broke page loads ("this page couldn't
-  // load") on every refresh — and because Safari shares the worker with the
-  // installed PWA, both failed together. Instead, on every load we tear down
-  // any worker still registered on this device and wipe its caches, so the app
-  // always loads straight from the network. (The deployed /sw.js is a kill
-  // switch that also unregisters itself for devices that can't reach this code
-  // because the old worker is still breaking their page loads.)
+  // No service worker is registered. On every load we defensively unregister
+  // any stale worker left over from older app versions and wipe their caches,
+  // so the app always loads straight from the network.
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
