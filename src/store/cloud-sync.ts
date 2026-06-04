@@ -413,8 +413,9 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
       )
     );
     if (subtaskRows.length > 0) {
-      const { error: subErr } = await withTimeout(
-        supabase.from("subtasks").upsert(subtaskRows, { onConflict: "id" }),
+      const { error: subErr } = await withAuthRetry(
+        supabase,
+        () => supabase.from("subtasks").upsert(subtaskRows, { onConflict: "id" }),
         "push subtasks"
       );
       if (subErr) {
@@ -428,16 +429,24 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
     // Drop subtasks that were removed locally for the affected tasks.
     const keepIds = new Set(subtaskRows.map((row) => row.id));
     for (const task of tasks) {
-      const query = supabase.from("subtasks").delete().eq("task_id", task.id);
       const liveIds = task.subtasks
         .map((s) => s.id)
         .filter((id) => keepIds.has(id));
-      const { error: delErr } = liveIds.length
-        ? await withTimeout(
-            query.not("id", "in", `(${liveIds.join(",")})`),
-            "prune subtasks"
-          )
-        : await withTimeout(query, "prune subtasks");
+      // Build a fresh query each attempt (query builders are single-use) so the
+      // auth-retry can re-run it after refreshing an expired token.
+      const { error: delErr } = await withAuthRetry(
+        supabase,
+        () => {
+          const query = supabase
+            .from("subtasks")
+            .delete()
+            .eq("task_id", task.id);
+          return liveIds.length
+            ? query.not("id", "in", `(${liveIds.join(",")})`)
+            : query;
+        },
+        "prune subtasks"
+      );
       if (delErr) {
         if (!isMissingTable(delErr)) {
           console.error("[cadence] prune subtasks failed", delErr);

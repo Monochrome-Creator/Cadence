@@ -59,7 +59,15 @@ export function CloudSyncProvider() {
             "resume getSession",
             8_000
           );
-          if (cancelled || !data.session) return;
+          if (cancelled) return;
+          // getSession() transparently refreshes an expired token. A null
+          // session here means the refresh token itself is gone/invalid — the
+          // user is effectively signed out, so be honest and flip the dot red
+          // instead of leaving it on a stale "synced".
+          if (!data.session) {
+            useProdStore.setState({ connectionStatus: "offline" });
+            return;
+          }
           setCurrentUser(data.session.user.id, data.session.user.email);
           void useProdStore.getState().forceSync();
         } catch {
@@ -72,6 +80,16 @@ export function CloudSyncProvider() {
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") recover();
+    };
+
+    // Mobile browsers frequently restore a backgrounded PWA/tab from the
+    // back/forward cache, where `visibilitychange` never fires — only
+    // `pageshow` with `persisted: true`. Without this, a phone that was locked
+    // for an hour resumes with an expired token and no recovery trigger, which
+    // is the "UI works but nothing saves" case. Treat a bfcache restore the
+    // same as a foreground resume.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) recover();
     };
 
     void (async () => {
@@ -153,6 +171,7 @@ export function CloudSyncProvider() {
     // recovers instead of silently failing every write.
     if (isSupabaseConfigured) {
       document.addEventListener("visibilitychange", onVisibility);
+      window.addEventListener("pageshow", onPageShow);
       window.addEventListener("online", recover);
     }
 
@@ -160,6 +179,7 @@ export function CloudSyncProvider() {
       cancelled = true;
       subscription?.unsubscribe();
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("online", recover);
     };
   }, [hydrate]);
