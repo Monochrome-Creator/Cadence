@@ -91,6 +91,18 @@ export interface SubtaskRollup {
 }
 
 /**
+ * Effective completion of a leaf micro-task. A checked-off row counts as 100%
+ * even if its percent was never set, so the checkbox and the percent field stay
+ * in agreement and both feed the roll-ups identically.
+ */
+function leafPercent(subtask: Subtask): number {
+  return Math.max(
+    subtask.status === "done" ? 100 : 0,
+    clampPercent(subtask.percent ?? 0)
+  );
+}
+
+/**
  * Derive each micro-task's completion percent from the flat, outline-ordered
  * subtask list. A row's direct children are the contiguous following rows
  * exactly one level deeper (until a row at the same or shallower level closes
@@ -120,7 +132,7 @@ export function computeSubtaskRollups(
     const kids = directChildren(i);
     const result =
       kids.length === 0
-        ? clampPercent(subtasks[i].percent ?? 0)
+        ? leafPercent(subtasks[i])
         : Math.round(kids.reduce((sum, j) => sum + value(j), 0) / kids.length);
     memo[i] = result;
     return result;
@@ -151,6 +163,21 @@ export function computeTaskProgress(subtasks: Subtask[]): number {
   return Math.round(
     roots.reduce((sum, s) => sum + rollups[s.id].percent, 0) / roots.length
   );
+}
+
+/**
+ * Card fraction badge data: how many L3 action tasks are fully complete out of
+ * the total number of L3 tasks. A leaf is "complete" at 100% (which includes a
+ * checked-off row). Returns { done: 0, total: 0 } when the task has no L3s — the
+ * caller decides what to show in that case.
+ */
+export function computeL3Fraction(subtasks: Subtask[]): {
+  done: number;
+  total: number;
+} {
+  const l3 = subtasks.filter((s) => s.level === "L3");
+  const done = l3.filter((s) => leafPercent(s) >= 100).length;
+  return { done, total: l3.length };
 }
 
 export interface Flashcard {

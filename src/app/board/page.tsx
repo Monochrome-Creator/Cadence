@@ -50,6 +50,7 @@ import {
 import {
   TASK_STATUSES,
   clampPercent,
+  computeL3Fraction,
   computeSubtaskRollups,
   computeTaskProgress,
   useProdStore,
@@ -790,6 +791,11 @@ function SortableTaskCard({
   const doneCount = task.subtasks.filter((s) => s.status === "done").length;
   // Overall completion rolled up from the L1 micro-tasks' averaged progress.
   const progress = computeTaskProgress(task.subtasks);
+  // Fraction badge: completed L3 action tasks over total L3s. Falls back to the
+  // plain done/total of all micro-tasks when the card has no L3s yet.
+  const l3 = computeL3Fraction(task.subtasks);
+  const fractionDone = l3.total > 0 ? l3.done : doneCount;
+  const fractionTotal = l3.total > 0 ? l3.total : task.subtasks.length;
   // Color-codes the whole card by category for at-a-glance grouping.
   const theme = categoryTheme(task.category);
 
@@ -883,7 +889,7 @@ function SortableTaskCard({
 
               {task.subtasks.length > 0 && (
                 <span className="shrink-0 rounded-full bg-[var(--c-beige)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]">
-                  {doneCount}/{task.subtasks.length}
+                  {fractionDone}/{fractionTotal}
                 </span>
               )}
             </div>
@@ -1067,6 +1073,9 @@ function SortableTaskCard({
 
 function TaskDragOverlayCard({ task }: { task: Task }) {
   const doneCount = task.subtasks.filter((s) => s.status === "done").length;
+  const l3 = computeL3Fraction(task.subtasks);
+  const fractionDone = l3.total > 0 ? l3.done : doneCount;
+  const fractionTotal = l3.total > 0 ? l3.total : task.subtasks.length;
   const deadline = formatDeadline(task.deadline);
   const theme = categoryTheme(task.category);
 
@@ -1117,7 +1126,7 @@ function TaskDragOverlayCard({ task }: { task: Task }) {
       )}
       {task.subtasks.length > 0 && (
         <span className="shrink-0 rounded-full bg-[var(--c-beige)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]">
-          {doneCount}/{task.subtasks.length}
+          {fractionDone}/{fractionTotal}
         </span>
       )}
     </div>
@@ -1700,7 +1709,7 @@ export default function BoardPage() {
                           theme.pill
                         )}
                       >
-                        {groupTasks.length}
+                        {groupTasks.filter((t) => t.status !== "Done").length}
                       </span>
 
                       {/* General is the permanent fallback — no rename/delete. */}
