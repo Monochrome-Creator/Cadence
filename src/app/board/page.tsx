@@ -55,7 +55,9 @@ import {
   computeTaskProgress,
   useProdStore,
   type Recurrence,
+  type Subtask,
   type SubtaskLevel,
+  type SubtaskRollup,
   type Task,
   type TaskPriority,
   type TaskStatus,
@@ -516,12 +518,196 @@ function LevelGuideTooltip() {
 /*                            Nested micro-task panel                         */
 /* -------------------------------------------------------------------------- */
 
+/** A single draggable micro-task row inside {@link MicroTaskPanel}. */
+function SortableMicroTask({
+  taskId,
+  subtask,
+  roll,
+  focusId,
+  setFocusId,
+  updateSubtask,
+  deleteSubtask,
+  insertChild,
+}: {
+  taskId: string;
+  subtask: Subtask;
+  roll: SubtaskRollup | undefined;
+  focusId: string | null;
+  setFocusId: (id: string | null) => void;
+  updateSubtask: ReturnType<typeof useProdStore.getState>["updateSubtask"];
+  deleteSubtask: ReturnType<typeof useProdStore.getState>["deleteSubtask"];
+  insertChild: (subtaskId: string, level: SubtaskLevel) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: subtask.id });
+
+  const done = subtask.status === "done";
+  const nested = subtask.level !== "L1";
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "group/sub flex items-stretch",
+        // Each tier nests one indentation step deeper.
+        LEVEL_INDENT[subtask.level],
+        isDragging && "relative z-10 opacity-80"
+      )}
+    >
+      {/* Vertical guide line clarifies the nesting hierarchy. */}
+      {nested && (
+        <span
+          aria-hidden
+          className="mr-2 w-px shrink-0 self-stretch bg-[var(--c-line-strong)]"
+        />
+      )}
+
+      <div className="flex flex-1 items-start gap-2 rounded-lg bg-[var(--c-panel-soft)] px-2 py-1.5">
+        {/* Drag handle — hover-revealed, reorders this row up/down. */}
+        <button
+          type="button"
+          aria-label="Drag to reorder micro-task"
+          className="mt-0.5 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100 active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="size-3.5" />
+        </button>
+
+        <button
+          type="button"
+          aria-label={done ? "Mark as to-do" : "Mark as done"}
+          onClick={() =>
+            updateSubtask(taskId, subtask.id, {
+              status: done ? "todo" : "done",
+            })
+          }
+          className={cn(
+            "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+            done
+              ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
+              : "border-[var(--c-line-strong)] text-transparent hover:border-[#a35d4d]"
+          )}
+        >
+          <Check className="size-3" />
+        </button>
+
+        {/* Click the badge to cycle this micro-task's depth. */}
+        <button
+          type="button"
+          onClick={() =>
+            updateSubtask(taskId, subtask.id, {
+              level: NEXT_LEVEL[subtask.level],
+            })
+          }
+          title={`Level ${subtask.level} — click to change depth`}
+          aria-label={`Micro-task level ${subtask.level}, click to cycle`}
+          className={cn(
+            "mt-0.5 shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide transition-transform hover:scale-105 active:scale-95",
+            LEVEL_BADGE[subtask.level]
+          )}
+        >
+          {subtask.level}
+        </button>
+
+        <TextareaAutosize
+          value={subtask.title}
+          onChange={(e) =>
+            updateSubtask(taskId, subtask.id, {
+              title: e.target.value,
+            })
+          }
+          ref={
+            focusId === subtask.id
+              ? (el) => {
+                  if (el) {
+                    el.focus();
+                    setFocusId(null);
+                  }
+                }
+              : undefined
+          }
+          placeholder="Micro-task…"
+          rows={1}
+          className={cn(
+            "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] focus:bg-[var(--c-panel)]",
+            done ? "text-[var(--c-faint)] line-through" : "text-[var(--c-ink-2)]"
+          )}
+        />
+
+        {/* Completion percent — editable on leaves, rolled-up on parents. */}
+        <span className="mt-0.5 flex shrink-0 items-center gap-1">
+          <PercentControl
+            percent={roll?.percent ?? 0}
+            editable={roll?.editable ?? true}
+            onChange={(next) =>
+              updateSubtask(taskId, subtask.id, { percent: next })
+            }
+          />
+          <MicroDeadlineField
+            value={subtask.deadline ?? ""}
+            onChange={(next) =>
+              updateSubtask(taskId, subtask.id, { deadline: next })
+            }
+          />
+        </span>
+
+        {/* Hover-revealed inline "add child" affordance. */}
+        <button
+          type="button"
+          onClick={() => insertChild(subtask.id, subtask.level)}
+          title={`Add ${DEEPER_LEVEL[subtask.level]} below`}
+          aria-label={`Add ${DEEPER_LEVEL[subtask.level]} micro-task below`}
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100"
+        >
+          <Plus className="size-3.5" />
+        </button>
+
+        {/* Hover-revealed delete — drops this row and its children. */}
+        <button
+          type="button"
+          onClick={() => deleteSubtask(taskId, subtask.id)}
+          title={`Delete this ${subtask.level} micro-task`}
+          aria-label={`Delete ${subtask.level} micro-task`}
+          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[#f6e0e0] hover:text-[#9b3b3b] focus-visible:opacity-100 group-hover/sub:opacity-100"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function MicroTaskPanel({ task }: { task: Task }) {
   const updateTask = useProdStore((state) => state.updateTask);
   const addSubtask = useProdStore((state) => state.addSubtask);
   const updateSubtask = useProdStore((state) => state.updateSubtask);
   const insertSubtaskAfter = useProdStore((state) => state.insertSubtaskAfter);
   const deleteSubtask = useProdStore((state) => state.deleteSubtask);
+  const reorderSubtasks = useProdStore((state) => state.reorderSubtasks);
+
+  // Isolated sensors for the nested micro-task list so dragging a row never
+  // bubbles up to the board's card-level drag context.
+  const subtaskSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleSubtaskDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      reorderSubtasks(task.id, String(active.id), String(over.id));
+    }
+  };
 
   const [newSubtask, setNewSubtask] = useState("");
   const [newLevel, setNewLevel] = useState<SubtaskLevel>("L1");
@@ -575,131 +761,30 @@ function MicroTaskPanel({ task }: { task: Task }) {
             </p>
           )}
 
-          {task.subtasks.map((subtask) => {
-            const done = subtask.status === "done";
-            const nested = subtask.level !== "L1";
-            const roll = rollups[subtask.id];
-            return (
-              <div
-                key={subtask.id}
-                className={cn(
-                  "group/sub flex items-stretch",
-                  // Each tier nests one indentation step deeper.
-                  LEVEL_INDENT[subtask.level]
-                )}
-              >
-                {/* Vertical guide line clarifies the nesting hierarchy. */}
-                {nested && (
-                  <span
-                    aria-hidden
-                    className="mr-2 w-px shrink-0 self-stretch bg-[var(--c-line-strong)]"
-                  />
-                )}
-
-                <div className="flex flex-1 items-start gap-2 rounded-lg bg-[var(--c-panel-soft)] px-2 py-1.5">
-                  <button
-                    type="button"
-                    aria-label={done ? "Mark as to-do" : "Mark as done"}
-                    onClick={() =>
-                      updateSubtask(task.id, subtask.id, {
-                        status: done ? "todo" : "done",
-                      })
-                    }
-                    className={cn(
-                      "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                      done
-                        ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
-                        : "border-[var(--c-line-strong)] text-transparent hover:border-[#a35d4d]"
-                    )}
-                  >
-                    <Check className="size-3" />
-                  </button>
-
-                  {/* Click the badge to cycle this micro-task's depth. */}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      updateSubtask(task.id, subtask.id, {
-                        level: NEXT_LEVEL[subtask.level],
-                      })
-                    }
-                    title={`Level ${subtask.level} — click to change depth`}
-                    aria-label={`Micro-task level ${subtask.level}, click to cycle`}
-                    className={cn(
-                      "mt-0.5 shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide transition-transform hover:scale-105 active:scale-95",
-                      LEVEL_BADGE[subtask.level]
-                    )}
-                  >
-                    {subtask.level}
-                  </button>
-
-                  <TextareaAutosize
-                    value={subtask.title}
-                    onChange={(e) =>
-                      updateSubtask(task.id, subtask.id, {
-                        title: e.target.value,
-                      })
-                    }
-                    ref={
-                      focusId === subtask.id
-                        ? (el) => {
-                            if (el) {
-                              el.focus();
-                              setFocusId(null);
-                            }
-                          }
-                        : undefined
-                    }
-                    placeholder="Micro-task…"
-                    rows={1}
-                    className={cn(
-                      "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] focus:bg-[var(--c-panel)]",
-                      done ? "text-[var(--c-faint)] line-through" : "text-[var(--c-ink-2)]"
-                    )}
-                  />
-
-                  {/* Completion percent — editable on leaves, rolled-up on parents. */}
-                  <span className="mt-0.5 flex shrink-0 items-center gap-1">
-                    <PercentControl
-                      percent={roll?.percent ?? 0}
-                      editable={roll?.editable ?? true}
-                      onChange={(next) =>
-                        updateSubtask(task.id, subtask.id, { percent: next })
-                      }
-                    />
-                    <MicroDeadlineField
-                      value={subtask.deadline ?? ""}
-                      onChange={(next) =>
-                        updateSubtask(task.id, subtask.id, { deadline: next })
-                      }
-                    />
-                  </span>
-
-                  {/* Hover-revealed inline "add child" affordance. */}
-                  <button
-                    type="button"
-                    onClick={() => insertChild(subtask.id, subtask.level)}
-                    title={`Add ${DEEPER_LEVEL[subtask.level]} below`}
-                    aria-label={`Add ${DEEPER_LEVEL[subtask.level]} micro-task below`}
-                    className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-
-                  {/* Hover-revealed delete — drops this row and its children. */}
-                  <button
-                    type="button"
-                    onClick={() => deleteSubtask(task.id, subtask.id)}
-                    title={`Delete this ${subtask.level} micro-task`}
-                    aria-label={`Delete ${subtask.level} micro-task`}
-                    className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[#f6e0e0] hover:text-[#9b3b3b] focus-visible:opacity-100 group-hover/sub:opacity-100"
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          <DndContext
+            sensors={subtaskSensors}
+            collisionDetection={closestCorners}
+            onDragEnd={handleSubtaskDragEnd}
+          >
+            <SortableContext
+              items={task.subtasks.map((s) => s.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {task.subtasks.map((subtask) => (
+                <SortableMicroTask
+                  key={subtask.id}
+                  taskId={task.id}
+                  subtask={subtask}
+                  roll={rollups[subtask.id]}
+                  focusId={focusId}
+                  setFocusId={setFocusId}
+                  updateSubtask={updateSubtask}
+                  deleteSubtask={deleteSubtask}
+                  insertChild={insertChild}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </div>
 
         {/* Add micro-task row */}

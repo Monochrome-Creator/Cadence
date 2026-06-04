@@ -402,6 +402,16 @@ interface ProdState {
    * children) so the hierarchy never ends up with orphaned rows.
    */
   deleteSubtask: (taskId: string, subtaskId: string) => void;
+  /**
+   * Reorders a micro-task within its task by moving `activeId` to where
+   * `overId` currently sits (drag-and-drop). The new array position persists as
+   * `subtask_order` on the next sync.
+   */
+  reorderSubtasks: (
+    taskId: string,
+    activeId: string,
+    overId: string
+  ) => void;
   setFlashcards: (flashcards: Flashcard[]) => void;
   setActiveTask: (id: string | null) => void;
 
@@ -930,6 +940,22 @@ export const useProdStore = create<ProdState>()(
             ...task.subtasks.slice(end),
           ],
         };
+      }),
+    }));
+    queueTaskPush(get, [taskId]);
+  },
+  reorderSubtasks: (taskId, activeId, overId) => {
+    if (activeId === overId) return;
+    set((state) => ({
+      tasks: state.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const from = task.subtasks.findIndex((s) => s.id === activeId);
+        const to = task.subtasks.findIndex((s) => s.id === overId);
+        if (from === -1 || to === -1) return task;
+        const next = [...task.subtasks];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return { ...task, subtasks: next };
       }),
     }));
     queueTaskPush(get, [taskId]);

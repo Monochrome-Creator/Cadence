@@ -20,6 +20,7 @@ import {
 
 import {
   computeHistoryStats,
+  computeL3Fraction,
   useProdStore,
   type HistoryStats,
   type Task,
@@ -47,6 +48,17 @@ const PRIORITY_PILL: Record<TaskPriority, string> = {
   High: "bg-[#f6e6da] text-[#a35d4d]",
   Critical: "bg-[#f4dede] text-[#9b3b3b]",
 };
+
+/** Lower rank = more important — drives the dashboard "Today's focus" order. */
+const PRIORITY_RANK: Record<TaskPriority, number> = {
+  Critical: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+/** How many of the most important tasks the dashboard surfaces at once. */
+const FOCUS_LIMIT = 5;
 
 type CategoryTheme = { pill: string; spine: string; tint: string };
 
@@ -325,7 +337,12 @@ function FocusRow({
   const theme = categoryTheme(task.category);
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
-  const subDone = task.subtasks.filter((s) => s.status === "done").length;
+  const l3 = computeL3Fraction(task.subtasks);
+  const subDone =
+    l3.total > 0
+      ? l3.done
+      : task.subtasks.filter((s) => s.status === "done").length;
+  const subTotal = l3.total > 0 ? l3.total : task.subtasks.length;
   const category = task.category.trim() || "General";
 
   return (
@@ -392,7 +409,7 @@ function FocusRow({
             {task.subtasks.length > 0 && (
               <span className="inline-flex items-center gap-1.5">
                 <Layers className="size-3 text-[var(--c-faint)]" />
-                {subDone}/{task.subtasks.length} micro-tasks
+                {subDone}/{subTotal} micro-tasks
               </span>
             )}
           </div>
@@ -575,17 +592,40 @@ export default function HomePage() {
   const GreetingIcon = greeting.icon;
   const dateLabel = now ? format(now, "EEEE, MMMM d") : "";
 
-  // Today's focus: the active task first, then the rest in board order.
-  const focusTasks = useMemo(() => {
+  // Rank tasks by importance so the dashboard can surface what matters now
+  // rather than the whole board: the pinned focus task leads, then incomplete
+  // work, then higher priority, then the nearest deadline.
+  const rankedTasks = useMemo(() => {
+    const deadlineValue = (d: string | undefined) => {
+      const match = d?.match(/\d{4}-\d{2}-\d{2}/);
+      return match ? Date.parse(match[0]) : Number.POSITIVE_INFINITY;
+    };
     return [...tasks].sort((a, b) => {
       if (a.id === activeTaskId) return -1;
       if (b.id === activeTaskId) return 1;
+      const aDone = a.status === "Done" ? 1 : 0;
+      const bDone = b.status === "Done" ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority]) {
+        return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+      }
+      const aDl = deadlineValue(a.deadline);
+      const bDl = deadlineValue(b.deadline);
+      if (aDl !== bDl) return aDl - bDl;
       return a.order - b.order;
     });
   }, [tasks, activeTaskId]);
 
-  const goalDone = focusTasks.filter((t) => t.status === "Done").length;
-  const goalTotal = focusTasks.length;
+  // Today's focus shows only the most important handful — the rest live on the
+  // board (linked below).
+  const focusTasks = useMemo(
+    () => rankedTasks.slice(0, FOCUS_LIMIT),
+    [rankedTasks]
+  );
+
+  // The daily goal still reflects the whole board, not just the visible slice.
+  const goalDone = tasks.filter((t) => t.status === "Done").length;
+  const goalTotal = tasks.length;
 
   const toggle = (id: string) =>
     setActiveTask(activeTaskId === id ? null : id);
@@ -648,7 +688,9 @@ export default function HomePage() {
                 Today’s focus
               </h2>
               <span className="rounded-full bg-[var(--c-beige)] px-2.5 py-1 text-[12.5px] font-medium text-[var(--c-dim)]">
-                {focusTasks.length} {focusTasks.length === 1 ? "task" : "tasks"}
+                {rankedTasks.length > FOCUS_LIMIT
+                  ? `Top ${focusTasks.length} of ${rankedTasks.length}`
+                  : `${focusTasks.length} ${focusTasks.length === 1 ? "task" : "tasks"}`}
               </span>
             </div>
             <Link
