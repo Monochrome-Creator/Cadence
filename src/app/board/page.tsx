@@ -389,6 +389,14 @@ function PercentControl({
   editable: boolean;
   onChange: (next: number) => void;
 }) {
+  // While editing, the input shows its own draft string so the user can clear
+  // the field (and type a fresh number) instead of fighting a controlled "0"
+  // that snaps back on every keystroke. When not focused it just mirrors the
+  // committed value, so no effect is needed to keep them in sync.
+  const [draft, setDraft] = useState("");
+  const [focused, setFocused] = useState(false);
+  const value = focused ? draft : String(percent);
+
   if (!editable) {
     return (
       <span
@@ -410,9 +418,32 @@ function PercentControl({
         min={0}
         max={100}
         step={10}
-        value={percent}
+        value={value}
         aria-label="Completion percent"
-        onChange={(e) => onChange(clampPercent(e.target.valueAsNumber))}
+        onFocus={(e) => {
+          setDraft(String(percent));
+          setFocused(true);
+          e.target.select();
+        }}
+        onChange={(e) => {
+          const raw = e.target.value;
+          // Allow an empty field while editing — don't force it back to 0.
+          if (raw === "") {
+            setDraft("");
+            return;
+          }
+          const next = clampPercent(e.target.valueAsNumber);
+          // Canonicalise (strips leading zeros, clamps) and commit live.
+          setDraft(String(next));
+          onChange(next);
+        }}
+        onBlur={() => {
+          setFocused(false);
+          // An empty/invalid field on blur settles to 0.
+          const next = draft === "" ? 0 : clampPercent(Number(draft));
+          setDraft(String(next));
+          onChange(next);
+        }}
         className="w-7 border-0 bg-transparent p-0 text-right text-[11px] font-semibold tabular-nums text-[#5f7d56] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       %
