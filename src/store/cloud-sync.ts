@@ -104,7 +104,7 @@ const CLOUD_TIMEOUT_MS = 28_000;
  * Settle cloud work promptly so the local-first UI can keep working and report
  * offline mode instead of appearing stuck on "Syncing".
  */
-function withTimeout<T>(operation: PromiseLike<T>, label: string, ms = CLOUD_TIMEOUT_MS): Promise<T> {
+export function withTimeout<T>(operation: PromiseLike<T>, label: string, ms = CLOUD_TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`${label} timed out`)),
@@ -121,6 +121,48 @@ function withTimeout<T>(operation: PromiseLike<T>, label: string, ms = CLOUD_TIM
       }
     );
   });
+}
+
+/* --------------------------- auth-error retry ---------------------------- */
+
+/**
+ * True when a failed Supabase call looks like an expired/invalid access token
+ * rather than a genuine data error. After a mobile tab sits backgrounded past
+ * the ~1h token lifetime, the first write back comes through as a 401 / PostgREST
+ * "JWT expired" (PGRST301), and RLS then rejects with 42501 because auth.uid()
+ * is null. All three mean "refresh the token and try again", not "data is bad".
+ */
+function isAuthError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { code?: string; status?: number; message?: string };
+  if (e.status === 401) return true;
+  if (e.code === "PGRST301" || e.code === "42501") return true;
+  const msg = (e.message ?? "").toLowerCase();
+  return msg.includes("jwt") || msg.includes("expired");
+}
+
+/**
+ * Runs a Supabase write and, if it fails because the token expired, forces one
+ * session refresh and retries exactly once. `run` must build a fresh query each
+ * call (query builders are single-use). Without this, every mutation after the
+ * token lapses fails silently — the UI keeps accepting edits that never persist.
+ */
+async function withAuthRetry<T extends { error: unknown }>(
+  supabase: SupabaseClient,
+  run: () => PromiseLike<T>,
+  label: string
+): Promise<T> {
+  const first = await withTimeout(run(), label);
+  if (!isAuthError(first.error)) return first;
+
+  // Expired token — force a refresh, then retry the write once.
+  const { data, error } = await withTimeout(
+    supabase.auth.refreshSession(),
+    "refresh session"
+  );
+  if (error || !data.session) return first; // refresh failed — report original
+  setCurrentUser(data.session.user.id, data.session.user.email);
+  return withTimeout(run(), `${label} (retry)`);
 }
 
 /* ------------------------------- auth helper ----------------------------- */
@@ -282,10 +324,12 @@ export async function ensureUserRow(
       userEmail = data.user.email ?? undefined;
     }
 
-    const { error } = await withTimeout(
-      supabase
-        .from("users")
-        .upsert({ id: uid, email: userEmail }, { onConflict: "id" }),
+    const { error } = await withAuthRetry(
+      supabase,
+      () =>
+        supabase
+          .from("users")
+          .upsert({ id: uid, email: userEmail }, { onConflict: "id" }),
       "ensure user"
     );
     if (error) {
@@ -335,8 +379,12 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
     if (!userId) return false;
 
     const taskRows = tasks.map((task) => taskToRow(task, userId));
-    const { error: taskErr } = await withTimeout(
-      supabase.from("tasks").upsert(taskRows, { onConflict: "id" }),
+    // The first write of the batch carries auth-retry: if the token expired
+    // while backgrounded, it refreshes here so the subtask writes below
+    // (which reuse the now-fresh token) succeed without their own retry.
+    const { error: taskErr } = await withAuthRetry(
+      supabase,
+      () => supabase.from("tasks").upsert(taskRows, { onConflict: "id" }),
       "push tasks"
     );
     if (taskErr) {
@@ -433,8 +481,9 @@ export async function pushCategories(categories: string[]): Promise<void> {
   try {
     const userId = await getUserId(supabase);
     if (!userId) return;
-    const { error } = await withTimeout(
-      supabase.from("users").update({ categories }).eq("id", userId),
+    const { error } = await withAuthRetry(
+      supabase,
+      () => supabase.from("users").update({ categories }).eq("id", userId),
       "push categories"
     );
     if (error && !isMissingTable(error)) {
@@ -453,8 +502,9 @@ export async function deleteTaskRemote(taskId: string): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
   try {
-    const { error } = await withTimeout(
-      supabase.from("tasks").delete().eq("id", taskId),
+    const { error } = await withAuthRetry(
+      supabase,
+      () => supabase.from("tasks").delete().eq("id", taskId),
       "delete task"
     );
     if (error) {

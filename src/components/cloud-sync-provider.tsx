@@ -2,7 +2,12 @@
 
 import { useEffect } from "react";
 
-import { ensureUserRow, isSupabaseConfigured, setCurrentUser } from "@/store/cloud-sync";
+import {
+  ensureUserRow,
+  isSupabaseConfigured,
+  setCurrentUser,
+  withTimeout,
+} from "@/store/cloud-sync";
 import { getSupabaseClient } from "@/utils/supabase/client";
 import { useProdStore } from "@/store/use-prod-store";
 
@@ -27,6 +32,47 @@ export function CloudSyncProvider() {
   useEffect(() => {
     let cancelled = false;
     let subscription: { unsubscribe: () => void } | null = null;
+
+    /**
+     * Recover after the tab returns to the foreground or the network comes
+     * back. While a mobile PWA is frozen in the background its access token can
+     * expire and its auto-refresh timer stops firing, so the next write would
+     * silently fail. getSession() refreshes the token if needed (guarded by a
+     * timeout so a wedged lock can't hang us), then forceSync() flushes pending
+     * edits and re-pulls. On failure we flip to "offline" so the dot goes red.
+     */
+    const recover = () => {
+      if (cancelled) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState !== "visible"
+      ) {
+        return;
+      }
+      const supabase = getSupabaseClient();
+      if (!supabase) return;
+
+      void (async () => {
+        try {
+          const { data } = await withTimeout(
+            supabase.auth.getSession(),
+            "resume getSession",
+            8_000
+          );
+          if (cancelled || !data.session) return;
+          setCurrentUser(data.session.user.id, data.session.user.email);
+          void useProdStore.getState().forceSync();
+        } catch {
+          if (!cancelled) {
+            useProdStore.setState({ connectionStatus: "offline" });
+          }
+        }
+      })();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") recover();
+    };
 
     void (async () => {
       // 1. Local first — instant, offline-friendly.
@@ -81,6 +127,13 @@ export function CloudSyncProvider() {
                 6_000
               );
             }
+          } else if (
+            useProdStore.getState().connectionStatus === "offline"
+          ) {
+            // A token just refreshed (e.g. auto-refresh fired on focus) after a
+            // period where writes were failing — retry the pending sync now
+            // that we hold a valid token again.
+            void useProdStore.getState().forceSync();
           }
         } else if (
           event === "SIGNED_OUT" ||
@@ -96,9 +149,18 @@ export function CloudSyncProvider() {
       subscription = data.subscription;
     })();
 
+    // Listen for foreground/network resumes so a backgrounded mobile session
+    // recovers instead of silently failing every write.
+    if (isSupabaseConfigured) {
+      document.addEventListener("visibilitychange", onVisibility);
+      window.addEventListener("online", recover);
+    }
+
     return () => {
       cancelled = true;
       subscription?.unsubscribe();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", recover);
     };
   }, [hydrate]);
 

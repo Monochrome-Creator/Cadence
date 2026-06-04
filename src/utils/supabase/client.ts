@@ -30,15 +30,77 @@ export const isSupabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 // Fast Refresh / re-renders).
 let browserClient: SupabaseClient | null = null;
 
+/** How long to wait for the auth lock before proceeding without it. */
+const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
+
+/**
+ * Token-refresh lock that can never deadlock.
+ *
+ * supabase-js serialises token refreshes with the Web Locks API so two tabs
+ * can't rotate the refresh token simultaneously. On mobile, a tab that gets
+ * frozen in the background can leave that lock held — and when the user
+ * returns, every auth-gated request (getSession, refreshSession, any DB call)
+ * blocks forever waiting on a lock that never releases. That is the root cause
+ * of the "only a brand-new incognito tab works" bug.
+ *
+ * This wrapper still coordinates normally, but if it cannot acquire the lock
+ * within a few seconds it runs the work anyway instead of hanging. Liveness
+ * beats perfect cross-tab coordination for a single-tab mobile PWA — and within
+ * one tab the lock is uncontended, so the timeout only ever trips on the exact
+ * stuck-context case we're fixing.
+ */
+function timeoutLock<R>(
+  name: string,
+  _acquireTimeout: number,
+  fn: () => Promise<R>
+): Promise<R> {
+  // No Web Locks support (older browser / SSR) — just run it.
+  if (typeof navigator === "undefined" || !navigator.locks) return fn();
+
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    LOCK_ACQUIRE_TIMEOUT_MS
+  );
+
+  return navigator.locks
+    .request(name, { mode: "exclusive", signal: controller.signal }, () => fn())
+    .then(
+      (result) => result,
+      (error: unknown) => {
+        // AbortError = we couldn't acquire the lock in time. Run without it
+        // rather than wedge the session. Any other error is a real failure.
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return fn();
+        }
+        throw error;
+      }
+    )
+    .finally(() => clearTimeout(timer));
+}
+
 /**
  * Standard `@supabase/ssr` browser client factory. Throws if env vars are
  * missing — prefer {@link getSupabaseClient} in app code, which degrades to a
  * local-only mode instead of throwing.
+ *
+ * `storage` is intentionally left to `@supabase/ssr` (it uses cookies so the
+ * server can read the session); we only override the auth-resilience knobs.
  */
 export function createClient(): SupabaseClient {
   return createBrowserClient(
     SUPABASE_URL as string,
-    SUPABASE_ANON_KEY as string
+    SUPABASE_ANON_KEY as string,
+    {
+      auth: {
+        // Keep the session alive and refreshing across reloads and resumes.
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        // Deadlock-proof refresh lock (see timeoutLock above).
+        lock: timeoutLock,
+      },
+    }
   );
 }
 
