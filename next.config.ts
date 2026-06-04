@@ -14,6 +14,22 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Never cache the worker script, so the browser's update check always
+        // fetches the current (self-destructing) version and can evict an old
+        // worker instead of replaying a stale copy.
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },

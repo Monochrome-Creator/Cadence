@@ -18,8 +18,10 @@ const DISMISSED_KEY = "cadence-install-dismissed";
  * Two jobs, both client-only:
  *   1. Tear down any service worker left by older app versions. A registered
  *      worker is the sole cause of the "page couldn't load on refresh" failures
- *      (a stale cached shell whose hashed /_next chunks 404 after a redeploy),
- *      so the app no longer ships one — it just cleans up.
+ *      (a stale cached shell whose hashed /_next chunks 404 after a redeploy).
+ *      The app no longer registers one; `public/sw.js` is now a self-destructing
+ *      worker that evicts itself, and this effect is the same cleanup for pages
+ *      that do boot.
  *   2. Auto-present a custom "Add to Home Screen" prompt.
  *        - Chromium: captures `beforeinstallprompt` and triggers the native
  *          installer on click.
@@ -37,10 +39,10 @@ export function PwaInstallPrompt() {
   const [visible, setVisible] = useState(false);
 
   // Permanently remove any service worker from older app versions, and purge
-  // its caches. This is what lets an already-installed client self-heal: once
-  // it boots, the stale worker is unregistered and every future request goes
-  // straight to the network — exactly like a normal browser tab, which never
-  // hits the stale-chunk "page couldn't load on refresh" failure.
+  // its caches. This handles pages that still boot: the stale worker is
+  // unregistered and every future request goes straight to the network. Pages
+  // too wedged to run this are evicted by the self-destructing public/sw.js,
+  // which the browser fetches and activates on its own update check.
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       void navigator.serviceWorker.getRegistrations().then((registrations) => {
