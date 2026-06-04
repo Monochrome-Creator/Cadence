@@ -26,6 +26,8 @@
 --   Subtask.title        -> subtasks.title         text
 --   Subtask.status       -> subtasks.status        text  (SubtaskStatus union)
 --   Subtask.level        -> subtasks.level         text  (SubtaskLevel union)
+--   Subtask.percent      -> subtasks.percent        integer (0–100, null = parent)
+--   Subtask.deadline     -> subtasks.deadline       text  (yyyy-MM-dd, null unset)
 --   (array index)        -> subtasks.subtask_order integer (preserves ordering)
 --   categories (managed) -> users.categories       text[] (ordered board columns)
 -- ===========================================================================
@@ -84,8 +86,20 @@ create table if not exists public.subtasks (
   title         text not null default '',
   status        text not null default 'todo' check (status in ('todo', 'done')),
   level         text not null default 'L1'   check (level in ('L1', 'L2', 'L3')),
-  subtask_order integer not null default 0
+  subtask_order integer not null default 0,
+  -- Leaf completion percent (0–100); null on parent/legacy rows. Parent rows
+  -- show an average of their children, computed client-side.
+  percent       integer check (percent is null or (percent >= 0 and percent <= 100)),
+  -- Optional per-micro-task due date (yyyy-MM-dd); null when unset.
+  deadline      text
 );
+
+-- Existing installs: add the per-micro-task progress + deadline columns.
+alter table public.subtasks
+  add column if not exists percent integer
+    check (percent is null or (percent >= 0 and percent <= 100));
+alter table public.subtasks
+  add column if not exists deadline text;
 
 create index if not exists subtasks_task_order_idx
   on public.subtasks (task_id, subtask_order);

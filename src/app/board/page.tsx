@@ -33,6 +33,7 @@ import {
   CornerDownRight,
   FolderPlus,
   GripVertical,
+  HelpCircle,
   ListFilter,
   Minus,
   Pencil,
@@ -48,6 +49,9 @@ import {
 
 import {
   TASK_STATUSES,
+  clampPercent,
+  computeSubtaskRollups,
+  computeTaskProgress,
   useProdStore,
   type Recurrence,
   type SubtaskLevel,
@@ -211,6 +215,13 @@ function formatDeadline(deadline: string): string {
   return format(parseISO(iso), DEADLINE_FORMAT);
 }
 
+/** Tight "5 Jun" form for the inline micro-task deadline chips. */
+function formatCompactDeadline(deadline: string): string {
+  const iso = toDateInputValue(deadline);
+  if (!iso) return "";
+  return format(parseISO(iso), "d MMM");
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                Deadline field                              */
 /* -------------------------------------------------------------------------- */
@@ -313,6 +324,163 @@ function SessionStepper({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                         Compact micro-task controls                        */
+/* -------------------------------------------------------------------------- */
+
+/** Tiny inline deadline picker for a single micro-task row. */
+function MicroDeadlineField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const display = formatCompactDeadline(value);
+
+  const openPicker = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    if (typeof el.showPicker === "function") el.showPicker();
+    else el.focus();
+  };
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={openPicker}
+        title={display ? `Due ${display}` : "Set micro-task deadline"}
+        aria-label={
+          display ? `Deadline ${display}, click to change` : "Set micro-task deadline"
+        }
+        className={cn(
+          "flex items-center gap-1 rounded-md border border-transparent px-1.5 py-1 text-[11px] transition-colors hover:border-[var(--c-line)]",
+          display ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
+        )}
+      >
+        <CalendarDays className="size-3.5 shrink-0 text-[var(--c-faint)]" />
+        {display && <span className="tabular-nums">{display}</span>}
+      </button>
+      <input
+        ref={inputRef}
+        type="date"
+        value={toDateInputValue(value)}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label="Pick a micro-task deadline"
+        className="pointer-events-none absolute bottom-0 left-1.5 size-0 opacity-0"
+        tabIndex={-1}
+      />
+    </div>
+  );
+}
+
+/**
+ * Completion percent for a micro-task. Leaf rows (L3, or any row with no
+ * children) get an editable 10%-step input; parent rows show a read-only,
+ * auto-rolled-up average in a muted sage chip.
+ */
+function PercentControl({
+  percent,
+  editable,
+  onChange,
+}: {
+  percent: number;
+  editable: boolean;
+  onChange: (next: number) => void;
+}) {
+  if (!editable) {
+    return (
+      <span
+        title="Auto-calculated from the average of its sub-tasks"
+        aria-label={`Rolled-up progress ${percent} percent`}
+        className="flex shrink-0 items-center rounded-md bg-[var(--c-beige-2)] px-1.5 py-1 text-[11px] font-semibold tabular-nums text-[#5f7d56]"
+      >
+        {percent}%
+      </span>
+    );
+  }
+  return (
+    <label
+      title="Completion percent"
+      className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#6f9e6a]/40 bg-[var(--c-panel-soft)] px-1.5 py-0.5 text-[11px] font-semibold text-[#5f7d56] transition-colors focus-within:border-[#6f9e6a]"
+    >
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step={10}
+        value={percent}
+        aria-label="Completion percent"
+        onChange={(e) => onChange(clampPercent(e.target.valueAsNumber))}
+        className="w-7 border-0 bg-transparent p-0 text-right text-[11px] font-semibold tabular-nums text-[#5f7d56] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      %
+    </label>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          L1 / L2 / L3 guide tooltip                        */
+/* -------------------------------------------------------------------------- */
+
+/** Verbatim framework copy shown in the hover guide. */
+const LEVEL_GUIDE: { level: SubtaskLevel; text: string }[] = [
+  {
+    level: "L1",
+    text: "Level 1 (L1): The Parent / Phase. High-level outcome. Write using Nouns/Outcomes (e.g., 'E-Commerce Website Launch').",
+  },
+  {
+    level: "L2",
+    text: "Level 2 (L2): The Summary Task / Sub-Job. Aggregates progress of everything underneath it. Write using Noun + Verb or Category Names (e.g., 'Website Design').",
+  },
+  {
+    level: "L3",
+    text: "Level 3 (L3): The Work Package / Action Task. Bite-sized, actionable tasks taking 8–80 hours. Always start with an Action Verb (e.g., 'Design homepage wireframe').",
+  },
+];
+
+/** Subtle "?" affordance that reveals the L1/L2/L3 guide on hover or focus. */
+function LevelGuideTooltip() {
+  return (
+    <div className="group relative">
+      <button
+        type="button"
+        aria-label="L1/L2/L3 framework guide"
+        className="flex size-9 items-center justify-center rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] text-[var(--c-dim)] transition-colors hover:border-[#a35d4d]/30 hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+      >
+        <HelpCircle className="size-4" />
+      </button>
+      <div
+        role="tooltip"
+        className="pointer-events-none absolute top-full right-0 z-50 mt-2 w-80 max-w-[calc(100vw-3rem)] origin-top-right rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 text-left opacity-0 shadow-[0_8px_30px_rgba(74,64,54,0.18)] transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        <p className="mb-3 font-heading text-sm font-semibold text-[var(--c-ink-2)]">
+          The L1 / L2 / L3 framework
+        </p>
+        <ul className="space-y-3">
+          {LEVEL_GUIDE.map((guide) => (
+            <li key={guide.level} className="flex gap-2">
+              <span
+                className={cn(
+                  "mt-px h-fit shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
+                  LEVEL_BADGE[guide.level]
+                )}
+              >
+                {guide.level}
+              </span>
+              <p className="text-xs leading-snug text-[var(--c-dim)]">
+                {guide.text}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                            Nested micro-task panel                         */
 /* -------------------------------------------------------------------------- */
 
@@ -339,6 +507,9 @@ function MicroTaskPanel({ task }: { task: Task }) {
     const newId = insertSubtaskAfter(task.id, subtaskId, DEEPER_LEVEL[level]);
     if (newId) setFocusId(newId);
   };
+
+  // Per-row completion: leaves keep their own percent; parents average children.
+  const rollups = computeSubtaskRollups(task.subtasks);
 
   return (
     <div className="border-t border-[var(--c-line-2)] p-3 md:pl-12">
@@ -374,6 +545,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
           {task.subtasks.map((subtask) => {
             const done = subtask.status === "done";
             const nested = subtask.level !== "L1";
+            const roll = rollups[subtask.id];
             return (
               <div
                 key={subtask.id}
@@ -452,6 +624,23 @@ function MicroTaskPanel({ task }: { task: Task }) {
                       done ? "text-[var(--c-faint)] line-through" : "text-[var(--c-ink-2)]"
                     )}
                   />
+
+                  {/* Completion percent — editable on leaves, rolled-up on parents. */}
+                  <span className="mt-0.5 flex shrink-0 items-center gap-1">
+                    <PercentControl
+                      percent={roll?.percent ?? 0}
+                      editable={roll?.editable ?? true}
+                      onChange={(next) =>
+                        updateSubtask(task.id, subtask.id, { percent: next })
+                      }
+                    />
+                    <MicroDeadlineField
+                      value={subtask.deadline ?? ""}
+                      onChange={(next) =>
+                        updateSubtask(task.id, subtask.id, { deadline: next })
+                      }
+                    />
+                  </span>
 
                   {/* Hover-revealed inline "add child" affordance. */}
                   <button
@@ -568,6 +757,8 @@ function SortableTaskCard({
   };
 
   const doneCount = task.subtasks.filter((s) => s.status === "done").length;
+  // Overall completion rolled up from the L1 micro-tasks' averaged progress.
+  const progress = computeTaskProgress(task.subtasks);
   // Color-codes the whole card by category for at-a-glance grouping.
   const theme = categoryTheme(task.category);
 
@@ -793,6 +984,24 @@ function SortableTaskCard({
           </div>
         </div>
       </div>
+
+      {/* Overall progress — averaged roll-up of the L1 micro-tasks. */}
+      {task.subtasks.length > 0 && (
+        <div className="-mt-1 flex items-center gap-2 px-4 pb-3">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--c-beige)]">
+            <div
+              className="h-full rounded-full bg-[#6f9e6a] transition-[width] duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <span
+            title="Overall completion, averaged from the L1 micro-tasks"
+            className="shrink-0 text-[11px] font-semibold tabular-nums text-[#5f7d56]"
+          >
+            {progress}%
+          </span>
+        </div>
+      )}
 
       {/* Smoothly animated micro-task compartment */}
       <div
@@ -1382,6 +1591,8 @@ export default function BoardPage() {
               />
               <span className="hidden sm:inline">Refresh</span>
             </Button>
+
+            <LevelGuideTooltip />
           </div>
         </header>
 

@@ -45,6 +45,14 @@ export interface Subtask {
   title: string;
   status: SubtaskStatus;
   level: SubtaskLevel;
+  /**
+   * Completion percent (0–100) for a leaf micro-task. Parent rows ignore this
+   * stored value and show an average of their children instead (see
+   * computeSubtaskRollups). Undefined on rows created before this field.
+   */
+  percent?: number;
+  /** Optional per-micro-task due date as a yyyy-MM-dd string. */
+  deadline?: string;
 }
 
 export interface Task {
@@ -64,6 +72,85 @@ export interface Task {
   /** Manual sort position for drag-and-drop ordering (ascending). */
   order: number;
   subtasks: Subtask[];
+}
+
+/** Numeric depth per level, for roll-up math. */
+const SUBTASK_LEVEL_NUM: Record<SubtaskLevel, number> = { L1: 1, L2: 2, L3: 3 };
+
+/** Clamp a raw percent into the 0–100 integer range. */
+export function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+export interface SubtaskRollup {
+  /** Completion 0–100: own value for leaves, averaged for parents. */
+  percent: number;
+  /** True for leaf rows (no deeper children) — the only directly editable ones. */
+  editable: boolean;
+}
+
+/**
+ * Derive each micro-task's completion percent from the flat, outline-ordered
+ * subtask list. A row's direct children are the contiguous following rows
+ * exactly one level deeper (until a row at the same or shallower level closes
+ * the block). Leaf rows use their own stored `percent`; parents average their
+ * direct children (recursively). This is the L1/L2/L3 roll-up where an L2
+ * aggregates its L3s and an L1 aggregates its L2s.
+ */
+export function computeSubtaskRollups(
+  subtasks: Subtask[]
+): Record<string, SubtaskRollup> {
+  const n = subtasks.length;
+  const level = subtasks.map((s) => SUBTASK_LEVEL_NUM[s.level]);
+
+  const directChildren = (i: number): number[] => {
+    const out: number[] = [];
+    for (let j = i + 1; j < n; j++) {
+      if (level[j] <= level[i]) break; // block closed by a same/shallower row
+      if (level[j] === level[i] + 1) out.push(j);
+    }
+    return out;
+  };
+
+  const memo = new Array<number | null>(n).fill(null);
+  const value = (i: number): number => {
+    const cached = memo[i];
+    if (cached !== null) return cached;
+    const kids = directChildren(i);
+    const result =
+      kids.length === 0
+        ? clampPercent(subtasks[i].percent ?? 0)
+        : Math.round(kids.reduce((sum, j) => sum + value(j), 0) / kids.length);
+    memo[i] = result;
+    return result;
+  };
+
+  const out: Record<string, SubtaskRollup> = {};
+  for (let i = 0; i < n; i++) {
+    out[subtasks[i].id] = {
+      percent: value(i),
+      editable: directChildren(i).length === 0,
+    };
+  }
+  return out;
+}
+
+/**
+ * Overall task completion: the average of its shallowest-level micro-tasks
+ * (the L1s when present), each already rolled up from its descendants. Returns
+ * 0 when the task has no micro-tasks.
+ */
+export function computeTaskProgress(subtasks: Subtask[]): number {
+  if (subtasks.length === 0) return 0;
+  const rollups = computeSubtaskRollups(subtasks);
+  const minLevel = Math.min(...subtasks.map((s) => SUBTASK_LEVEL_NUM[s.level]));
+  const roots = subtasks.filter(
+    (s) => SUBTASK_LEVEL_NUM[s.level] === minLevel
+  );
+  return Math.round(
+    roots.reduce((sum, s) => sum + rollups[s.id].percent, 0) / roots.length
+  );
 }
 
 export interface Flashcard {

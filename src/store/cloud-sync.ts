@@ -45,6 +45,10 @@ type SubtaskRow = {
   status: string;
   level: string;
   subtask_order: number;
+  /** Leaf completion percent (0–100); null on parent/legacy rows. */
+  percent: number | null;
+  /** Optional per-micro-task due date (yyyy-MM-dd); null when unset. */
+  deadline: string | null;
 };
 
 export { isSupabaseConfigured };
@@ -206,6 +210,8 @@ function subtaskToRow(subtask: Subtask, taskId: string, index: number): SubtaskR
     level: subtask.level,
     // Persist the array position so subtask ordering survives a round-trip.
     subtask_order: index,
+    percent: subtask.percent ?? null,
+    deadline: subtask.deadline ?? null,
   };
 }
 
@@ -232,6 +238,9 @@ function rowToSubtask(row: SubtaskRow): Subtask {
     title: row.title,
     status: row.status as SubtaskStatus,
     level: row.level as SubtaskLevel,
+    // Tolerate rows synced before these columns existed (null/undefined).
+    ...(row.percent != null ? { percent: row.percent } : {}),
+    ...(row.deadline ? { deadline: row.deadline } : {}),
   };
 }
 
