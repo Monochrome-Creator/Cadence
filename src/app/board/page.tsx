@@ -521,6 +521,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
   const addSubtask = useProdStore((state) => state.addSubtask);
   const updateSubtask = useProdStore((state) => state.updateSubtask);
   const insertSubtaskAfter = useProdStore((state) => state.insertSubtaskAfter);
+  const deleteSubtask = useProdStore((state) => state.deleteSubtask);
 
   const [newSubtask, setNewSubtask] = useState("");
   const [newLevel, setNewLevel] = useState<SubtaskLevel>("L1");
@@ -683,6 +684,17 @@ function MicroTaskPanel({ task }: { task: Task }) {
                     className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100"
                   >
                     <Plus className="size-3.5" />
+                  </button>
+
+                  {/* Hover-revealed delete — drops this row and its children. */}
+                  <button
+                    type="button"
+                    onClick={() => deleteSubtask(task.id, subtask.id)}
+                    title={`Delete this ${subtask.level} micro-task`}
+                    aria-label={`Delete ${subtask.level} micro-task`}
+                    className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[#f6e0e0] hover:text-[#9b3b3b] focus-visible:opacity-100 group-hover/sub:opacity-100"
+                  >
+                    <Trash2 className="size-3.5" />
                   </button>
                 </div>
               </div>

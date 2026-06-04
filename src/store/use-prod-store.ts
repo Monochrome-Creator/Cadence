@@ -396,6 +396,12 @@ interface ProdState {
     subtaskId: string,
     updates: Partial<Omit<Subtask, "id">>
   ) => void;
+  /**
+   * Removes a micro-task and its descendant block — the contiguous deeper rows
+   * that follow it in the outline (e.g. deleting an L1 also drops its L2/L3
+   * children) so the hierarchy never ends up with orphaned rows.
+   */
+  deleteSubtask: (taskId: string, subtaskId: string) => void;
   setFlashcards: (flashcards: Flashcard[]) => void;
   setActiveTask: (id: string | null) => void;
 
@@ -898,6 +904,33 @@ export const useProdStore = create<ProdState>()(
             }
           : task
       ),
+    }));
+    queueTaskPush(get, [taskId]);
+  },
+  deleteSubtask: (taskId, subtaskId) => {
+    set((state) => ({
+      tasks: state.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const index = task.subtasks.findIndex((s) => s.id === subtaskId);
+        if (index === -1) return task;
+        // Drop the target plus any contiguous deeper rows that follow it —
+        // those are its children in the outline-derived hierarchy.
+        const targetLevel = SUBTASK_LEVEL_NUM[task.subtasks[index].level];
+        let end = index + 1;
+        while (
+          end < task.subtasks.length &&
+          SUBTASK_LEVEL_NUM[task.subtasks[end].level] > targetLevel
+        ) {
+          end += 1;
+        }
+        return {
+          ...task,
+          subtasks: [
+            ...task.subtasks.slice(0, index),
+            ...task.subtasks.slice(end),
+          ],
+        };
+      }),
     }));
     queueTaskPush(get, [taskId]);
   },
