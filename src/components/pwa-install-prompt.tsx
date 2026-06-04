@@ -16,7 +16,10 @@ const DISMISSED_KEY = "cadence-install-dismissed";
 
 /**
  * Two jobs, both client-only:
- *   1. Register the service worker (`/sw.js`) so offline support kicks in.
+ *   1. Tear down any service worker left by older app versions. A registered
+ *      worker is the sole cause of the "page couldn't load on refresh" failures
+ *      (a stale cached shell whose hashed /_next chunks 404 after a redeploy),
+ *      so the app no longer ships one — it just cleans up.
  *   2. Auto-present a custom "Add to Home Screen" prompt.
  *        - Chromium: captures `beforeinstallprompt` and triggers the native
  *          installer on click.
@@ -33,68 +36,25 @@ export function PwaInstallPrompt() {
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
 
-  // Register the inert recovery worker on every host. It deletes caches left by
-  // older worker versions and never intercepts navigations, so a normal profile
-  // loads every page exactly like an incognito window.
+  // Permanently remove any service worker from older app versions, and purge
+  // its caches. This is what lets an already-installed client self-heal: once
+  // it boots, the stale worker is unregistered and every future request goes
+  // straight to the network — exactly like a normal browser tab, which never
+  // hits the stale-chunk "page couldn't load on refresh" failure.
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-
-    const basePath =
-      window.location.hostname === "monochrome-creator.github.io"
-        ? "/Cadence"
-        : "";
-    const hadController = Boolean(navigator.serviceWorker.controller);
-    let reloading = false;
-
-    const onControllerChange = () => {
-      // A controller change on an already-controlled client means a stale
-      // worker was replaced. Reload once so the next navigation uses the fixed
-      // worker immediately. Avoid a first-install reload on clean profiles.
-      if (!hadController || reloading) return;
-      reloading = true;
-      window.location.reload();
-    };
-
-    navigator.serviceWorker.addEventListener(
-      "controllerchange",
-      onControllerChange,
-    );
-
-    navigator.serviceWorker
-      .register(`${basePath}/sw.js`, {
-        scope: `${basePath}/`,
-        updateViaCache: "none",
-      })
-      .then((registration) => {
-        registration.waiting?.postMessage({ type: "SKIP_WAITING" });
-
-        registration.addEventListener("updatefound", () => {
-          const installing = registration.installing;
-          if (!installing) return;
-          installing.addEventListener("statechange", () => {
-            if (
-              installing.state === "installed" &&
-              navigator.serviceWorker.controller
-            ) {
-              installing.postMessage({ type: "SKIP_WAITING" });
-            }
-          });
-        });
-
-        void registration.update().catch(() => {
-          // A failed update check is harmless; the active worker keeps running.
-        });
-      })
-      .catch(() => {
-        // Non-fatal — app still works; offline fallback just won't be available.
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const registration of registrations) {
+          void registration.unregister();
+        }
       });
+    }
 
-    return () => {
-      navigator.serviceWorker.removeEventListener(
-        "controllerchange",
-        onControllerChange,
-      );
-    };
+    if ("caches" in window) {
+      void caches.keys().then((keys) => {
+        for (const key of keys) void caches.delete(key);
+      });
+    }
   }, []);
 
   useEffect(() => {
