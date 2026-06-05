@@ -52,7 +52,7 @@ import {
   clampPercent,
   computeL3Fraction,
   computeSubtaskRollups,
-  computeTaskProgress,
+  effectiveTaskProgress,
   useProdStore,
   type Recurrence,
   type Subtask,
@@ -200,6 +200,18 @@ const DEEPER_LEVEL: Record<SubtaskLevel, SubtaskLevel> = {
 type SortDirection = "none" | "desc" | "asc";
 type CategorySort = "none" | "asc" | "desc";
 type StatusFilter = TaskStatus | "all";
+
+/**
+ * Quick-glance status filter pills shown above the board. "All Active" (value
+ * "all") shows every task and is the only state where manual drag-reorder is
+ * enabled; the rest narrow the board to one status at a time.
+ */
+const STATUS_FILTER_PILLS: { value: StatusFilter; label: string }[] = [
+  { value: "all", label: "All Active" },
+  { value: "Working on it", label: "Working on it" },
+  { value: "Stuck", label: "Stuck" },
+  { value: "Not Started", label: "Not Started" },
+];
 
 const CATEGORY_SORT_LABELS: Record<CategorySort, string> = {
   none: "Sort: Category",
@@ -533,6 +545,7 @@ function SortableMicroTask({
   focusId,
   setFocusId,
   updateSubtask,
+  toggleComplete,
   deleteSubtask,
   insertChild,
 }: {
@@ -542,6 +555,7 @@ function SortableMicroTask({
   focusId: string | null;
   setFocusId: (id: string | null) => void;
   updateSubtask: ReturnType<typeof useProdStore.getState>["updateSubtask"];
+  toggleComplete: ReturnType<typeof useProdStore.getState>["toggleSubtaskComplete"];
   deleteSubtask: ReturnType<typeof useProdStore.getState>["deleteSubtask"];
   insertChild: (subtaskId: string, level: SubtaskLevel) => void;
 }) {
@@ -591,11 +605,7 @@ function SortableMicroTask({
         <button
           type="button"
           aria-label={done ? "Mark as to-do" : "Mark as done"}
-          onClick={() =>
-            updateSubtask(taskId, subtask.id, {
-              status: done ? "todo" : "done",
-            })
-          }
+          onClick={() => toggleComplete(taskId, subtask.id)}
           className={cn(
             "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
             done
@@ -699,6 +709,9 @@ function MicroTaskPanel({ task }: { task: Task }) {
   const insertSubtaskAfter = useProdStore((state) => state.insertSubtaskAfter);
   const deleteSubtask = useProdStore((state) => state.deleteSubtask);
   const reorderSubtasks = useProdStore((state) => state.reorderSubtasks);
+  const toggleSubtaskComplete = useProdStore(
+    (state) => state.toggleSubtaskComplete
+  );
 
   // Isolated sensors for the nested micro-task list so dragging a row never
   // bubbles up to the board's card-level drag context.
@@ -786,6 +799,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
                   focusId={focusId}
                   setFocusId={setFocusId}
                   updateSubtask={updateSubtask}
+                  toggleComplete={toggleSubtaskComplete}
                   deleteSubtask={deleteSubtask}
                   insertChild={insertChild}
                 />
@@ -866,13 +880,55 @@ function SortableTaskCard({
     (state) => state.completeAndRepeatTask
   );
 
+  // A task with no micro-tasks owns an editable manual percentage; once it has
+  // children, progress becomes the read-only roll-up of their completion.
+  const hasSubtasks = task.subtasks.length > 0;
+  const isDone = task.status === "Done";
+
   // Marking a recurring task Done regenerates the next occurrence instead of a
-  // plain status write.
+  // plain status write. Leaving Done clears a stale manual 100% so the bar and
+  // status stay in agreement (only relevant for childless tasks).
   const handleStatusChange = (next: TaskStatus) => {
     if (next === "Done" && task.recurrence !== "none") {
       completeAndRepeatTask(task.id);
+    } else if (next === "Done") {
+      updateTask(task.id, { status: "Done", ...(hasSubtasks ? {} : { progress: 100 }) });
     } else {
-      updateTask(task.id, { status: next });
+      updateTask(task.id, {
+        status: next,
+        ...(!hasSubtasks && isDone ? { progress: 0 } : {}),
+      });
+    }
+  };
+
+  // Manual percentage field (shown only on childless tasks). Hitting 100% marks
+  // the task Done; dropping back below reopens it so the bar tracks the field.
+  const handleProgressChange = (next: number) => {
+    if (next >= 100) {
+      if (task.recurrence !== "none") completeAndRepeatTask(task.id);
+      else updateTask(task.id, { progress: 100, status: "Done" });
+    } else {
+      updateTask(task.id, {
+        progress: next,
+        ...(isDone ? { status: "Working on it" as TaskStatus } : {}),
+      });
+    }
+  };
+
+  // Completion circle next to the title — force-complete (or reopen) the task.
+  const handleToggleComplete = () => {
+    if (isDone) {
+      updateTask(task.id, {
+        status: "Working on it",
+        ...(hasSubtasks ? {} : { progress: 0 }),
+      });
+    } else if (task.recurrence !== "none") {
+      completeAndRepeatTask(task.id);
+    } else {
+      updateTask(task.id, {
+        status: "Done",
+        ...(hasSubtasks ? {} : { progress: 100 }),
+      });
     }
   };
 
@@ -893,8 +949,8 @@ function SortableTaskCard({
   };
 
   const doneCount = task.subtasks.filter((s) => s.status === "done").length;
-  // Overall completion rolled up from the L1 micro-tasks' averaged progress.
-  const progress = computeTaskProgress(task.subtasks);
+  // Overall completion: Done → 100, else the L1 roll-up, else the manual %.
+  const progress = effectiveTaskProgress(task);
   // Fraction badge: completed L3 action tasks over total L3s. Falls back to the
   // plain done/total of all micro-tasks when the card has no L3s yet.
   const l3 = computeL3Fraction(task.subtasks);
@@ -976,6 +1032,22 @@ function SortableTaskCard({
             )}
           >
             <Target className="size-3.5" />
+          </button>
+
+          {/* Completion circle — force-complete (or reopen) the whole task. */}
+          <button
+            type="button"
+            onClick={handleToggleComplete}
+            aria-label={isDone ? "Mark task as not done" : "Mark task complete"}
+            title={isDone ? "Completed — click to reopen" : "Mark complete"}
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded-full border transition-colors",
+              isDone
+                ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
+                : "border-[var(--c-line-strong)] text-transparent hover:border-[#6f9e6a] hover:text-[#6f9e6a]"
+            )}
+          >
+            <Check className="size-3.5" />
           </button>
 
           {/* Title gets its own full-width column; the subtask count rides
@@ -1137,23 +1209,22 @@ function SortableTaskCard({
         </div>
       </div>
 
-      {/* Overall progress — averaged roll-up of the L1 micro-tasks. */}
-      {task.subtasks.length > 0 && (
-        <div className="-mt-1 flex items-center gap-2 px-4 pb-3">
-          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--c-beige)]">
-            <div
-              className="h-full rounded-full bg-[#6f9e6a] transition-[width] duration-300 ease-out"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <span
-            title="Overall completion, averaged from the L1 micro-tasks"
-            className="shrink-0 text-[11px] font-semibold tabular-nums text-[#5f7d56]"
-          >
-            {progress}%
-          </span>
+      {/* Overall progress. With micro-tasks it's the read-only L1 roll-up; with
+          none, the percentage field is manually editable (and hitting 100%
+          completes the task). */}
+      <div className="-mt-1 flex items-center gap-2 px-4 pb-3">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--c-beige)]">
+          <div
+            className="h-full rounded-full bg-[#6f9e6a] transition-[width] duration-300 ease-out"
+            style={{ width: `${progress}%` }}
+          />
         </div>
-      )}
+        <PercentControl
+          percent={progress}
+          editable={!hasSubtasks}
+          onChange={handleProgressChange}
+        />
+      </div>
 
       {/* Smoothly animated micro-task compartment */}
       <div
@@ -1750,6 +1821,29 @@ export default function BoardPage() {
             <LevelGuideTooltip />
           </div>
         </header>
+
+        {/* Quick-glance status filter pills — narrow the board to one status. */}
+        <div className="mb-6 flex flex-wrap items-center gap-2">
+          {STATUS_FILTER_PILLS.map(({ value, label }) => {
+            const active = statusFilter === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStatusFilter(value)}
+                aria-pressed={active}
+                className={cn(
+                  "rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+                  active
+                    ? "border-[#a35d4d]/30 bg-[var(--c-beige-2)] text-[#a35d4d]"
+                    : "border-[var(--c-line)] bg-[var(--c-panel-soft)] text-[var(--c-ink-3)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+                )}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
         {visibleTasks.length === 0 && tasks.length > 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-14 text-center text-sm text-[var(--c-dim)]">

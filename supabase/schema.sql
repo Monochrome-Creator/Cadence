@@ -66,6 +66,9 @@ create table if not exists public.tasks (
                      check (recurrence in ('none', 'daily', 'weekly', 'monthly', 'quarterly')),
   pomodoros_logged integer not null default 0 check (pomodoros_logged >= 0),
   task_order       integer not null default 0,
+  -- Manual completion percent (0–100); null when the task derives progress from
+  -- its micro-tasks instead of a manual override.
+  progress         integer check (progress is null or (progress >= 0 and progress <= 100)),
   updated_at       timestamptz not null default now()
 );
 
@@ -79,6 +82,11 @@ alter table public.tasks
 alter table public.tasks
   add constraint tasks_recurrence_check
     check (recurrence in ('none', 'daily', 'weekly', 'monthly', 'quarterly'));
+
+-- Existing installs: add the manual completion-percent override column.
+alter table public.tasks
+  add column if not exists progress integer
+    check (progress is null or (progress >= 0 and progress <= 100));
 
 create index if not exists tasks_user_order_idx
   on public.tasks (user_id, task_order);

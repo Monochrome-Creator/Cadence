@@ -76,6 +76,13 @@ export interface Task {
   pomodorosLogged: number;
   /** Manual sort position for drag-and-drop ordering (ascending). */
   order: number;
+  /**
+   * Manually-set completion percent (0–100). Only consulted when the task has
+   * NO micro-tasks — once children exist, progress is the read-only roll-up of
+   * their averaged completion (see effectiveTaskProgress). Undefined on tasks
+   * created before this field, treated as 0.
+   */
+  progress?: number;
   subtasks: Subtask[];
 }
 
@@ -168,6 +175,38 @@ export function computeTaskProgress(subtasks: Subtask[]): number {
   return Math.round(
     roots.reduce((sum, s) => sum + rollups[s.id].percent, 0) / roots.length
   );
+}
+
+/**
+ * Effective completion percent shown on a Main Task's progress bar. A task
+ * marked Done always reads 100% (so the dropdown/checkbox can force-complete it
+ * regardless of its children). Otherwise it's the roll-up of its micro-tasks
+ * when any exist, or the user's manual `progress` override when the task has no
+ * children — this is what keeps an empty task's percentage field editable.
+ */
+export function effectiveTaskProgress(task: Task): number {
+  if (task.status === "Done") return 100;
+  if (task.subtasks.length > 0) return computeTaskProgress(task.subtasks);
+  return clampPercent(task.progress ?? 0);
+}
+
+/**
+ * Mirrors a task's status to its micro-task roll-up: when children exist and
+ * average a full 100%, the task flips to Done so its status matches its bar.
+ * Only auto-completes non-recurring tasks (recurring ones must go through
+ * completeAndRepeatTask so the next occurrence is spawned) and never
+ * auto-reopens — walking a task back stays a deliberate user action.
+ */
+function syncStatusToProgress(task: Task): Task {
+  if (
+    task.recurrence === "none" &&
+    task.status !== "Done" &&
+    task.subtasks.length > 0 &&
+    computeTaskProgress(task.subtasks) >= 100
+  ) {
+    return { ...task, status: "Done" };
+  }
+  return task;
 }
 
 /**
@@ -428,6 +467,13 @@ interface ProdState {
     activeId: string,
     overId: string
   ) => void;
+  /**
+   * Toggles a micro-task's done state via its checkbox and cascades the new
+   * state to its entire descendant block. Checking a parent (L1/L2) therefore
+   * force-completes everything beneath it, driving its averaged roll-up to
+   * 100%; unchecking reopens the whole branch.
+   */
+  toggleSubtaskComplete: (taskId: string, subtaskId: string) => void;
   setFlashcards: (flashcards: Flashcard[]) => void;
   setActiveTask: (id: string | null) => void;
 
@@ -921,19 +967,24 @@ export const useProdStore = create<ProdState>()(
     return newId;
   },
   updateSubtask: (taskId, subtaskId, updates) => {
+    let becameDone = false;
     set((state) => ({
-      tasks: state.tasks.map((task) =>
-        task.id === taskId
-          ? {
-              ...task,
-              subtasks: task.subtasks.map((subtask) =>
-                subtask.id === subtaskId
-                  ? { ...subtask, ...updates }
-                  : subtask
-              ),
-            }
-          : task
-      ),
+      tasks: state.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const updated: Task = {
+          ...task,
+          subtasks: task.subtasks.map((subtask) =>
+            subtask.id === subtaskId ? { ...subtask, ...updates } : subtask
+          ),
+        };
+        // A change that pushes the roll-up to 100% auto-completes the task.
+        const synced = syncStatusToProgress(updated);
+        if (synced.status === "Done" && task.status !== "Done") becameDone = true;
+        return synced;
+      }),
+      history: becameDone
+        ? bumpHistory(state.history, "tasksDone")
+        : state.history,
     }));
     queueTaskPush(get, [taskId]);
   },
@@ -977,6 +1028,42 @@ export const useProdStore = create<ProdState>()(
         next.splice(to, 0, moved);
         return { ...task, subtasks: next };
       }),
+    }));
+    queueTaskPush(get, [taskId]);
+  },
+  toggleSubtaskComplete: (taskId, subtaskId) => {
+    let becameDone = false;
+    set((state) => ({
+      tasks: state.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const index = task.subtasks.findIndex((s) => s.id === subtaskId);
+        if (index === -1) return task;
+        // Flip the row, then apply the same state to its descendant block (the
+        // contiguous deeper rows) so a parent checkbox completes its children.
+        const nextStatus: SubtaskStatus =
+          task.subtasks[index].status === "done" ? "todo" : "done";
+        const targetLevel = SUBTASK_LEVEL_NUM[task.subtasks[index].level];
+        let end = index + 1;
+        while (
+          end < task.subtasks.length &&
+          SUBTASK_LEVEL_NUM[task.subtasks[end].level] > targetLevel
+        ) {
+          end += 1;
+        }
+        const updated: Task = {
+          ...task,
+          subtasks: task.subtasks.map((s, i) =>
+            i >= index && i < end ? { ...s, status: nextStatus } : s
+          ),
+        };
+        // Completing the last micro-tasks rolls the parent up to Done.
+        const synced = syncStatusToProgress(updated);
+        if (synced.status === "Done" && task.status !== "Done") becameDone = true;
+        return synced;
+      }),
+      history: becameDone
+        ? bumpHistory(state.history, "tasksDone")
+        : state.history,
     }));
     queueTaskPush(get, [taskId]);
   },
