@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowRight, Inbox as InboxIcon, Plus, Trash2 } from "lucide-react";
 
 import { useProdStore, type Task } from "@/store/use-prod-store";
@@ -12,8 +12,14 @@ import { useProdStore, type Task } from "@/store/use-prod-store";
  * user promotes them ("Move to board" flips the status to "Not Started").
  */
 export default function InboxPage() {
-  const inboxTasks = useProdStore((state) =>
-    state.tasks.filter((task) => task.status === "Inbox")
+  // Select the stable `tasks` reference and derive the filtered list with
+  // useMemo. Filtering *inside* the selector would return a fresh array on
+  // every render, which Zustand v5's useSyncExternalStore reads as a changed
+  // snapshot — an infinite render loop (React error #185).
+  const tasks = useProdStore((state) => state.tasks);
+  const inboxTasks = useMemo(
+    () => tasks.filter((task) => task.status === "Inbox"),
+    [tasks]
   );
   const addTask = useProdStore((state) => state.addTask);
 
