@@ -13,6 +13,7 @@ import {
   ArrowUp,
   CalendarDays,
   Check,
+  ChevronDown,
   Flame,
   Layers,
   Moon,
@@ -28,6 +29,7 @@ import {
 import {
   computeHistoryStats,
   computeL3Fraction,
+  DAILY_GOAL,
   useProdStore,
   type HistoryStats,
   type Recurrence,
@@ -372,7 +374,9 @@ function FocusRow({
         theme.spine,
         isActive ? "border-[#a35d4d]/40 bg-[#fcf4ef] ring-1 ring-[#a35d4d]/25" : theme.tint,
         // Dark mode flattens the pale category tints to a single warm panel.
-        "dark:bg-[var(--c-panel)]"
+        "dark:bg-[var(--c-panel)]",
+        // Completed tasks fade back so the active focus list stays prominent.
+        done && "opacity-50"
       )}
     >
       <div className="flex items-center gap-3 p-4 md:gap-4 md:px-[18px]">
@@ -476,11 +480,13 @@ function FocusRow({
 /* -------------------------------------------------------------------------- */
 
 function GoalRingCard({ done, total }: { done: number; total: number }) {
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  // Clamp so over-achieving the daily goal (e.g. 4 of 3) caps the ring at 100%.
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const ringProgress = total > 0 ? Math.min(1, done / total) : 0;
   const remaining = Math.max(0, total - done);
   return (
     <div className="flex items-center gap-5 rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel)] p-[22px] shadow-[0_1px_3px_rgba(74,64,54,0.05)]">
-      <ProgressRing progress={total > 0 ? done / total : 0}>
+      <ProgressRing progress={ringProgress}>
         <span className="font-mono text-3xl font-semibold text-[var(--c-ink-2)] tabular-nums">
           {pct}%
         </span>
@@ -701,6 +707,10 @@ export default function HomePage() {
 
   const name = useGreetingName();
 
+  // "Completed Today" accordion — defaults collapsed so finished work stays
+  // tucked away until the user wants to review it.
+  const [showCompleted, setShowCompleted] = useState(false);
+
   // Compute the greeting on the client only, so SSR and first paint agree.
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
@@ -742,16 +752,30 @@ export default function HomePage() {
     });
   }, [tasks, activeTaskId]);
 
-  // Today's focus shows only the most important handful — the rest live on the
-  // board (linked below).
-  const focusTasks = useMemo(
-    () => rankedTasks.slice(0, FOCUS_LIMIT),
+  // Split active work from finished work: completed tasks leave "Today's focus"
+  // entirely and collect in the "Completed Today" section at the bottom.
+  const activeTasks = useMemo(
+    () => rankedTasks.filter((t) => t.status !== "Done"),
+    [rankedTasks]
+  );
+  const completedTasks = useMemo(
+    () => rankedTasks.filter((t) => t.status === "Done"),
     [rankedTasks]
   );
 
-  // The daily goal still reflects the whole board, not just the visible slice.
-  const goalDone = tasks.filter((t) => t.status === "Done").length;
-  const goalTotal = tasks.length;
+  // Today's focus shows only the most important handful of active tasks — the
+  // rest live on the board (linked below).
+  const focusTasks = useMemo(
+    () => activeTasks.slice(0, FOCUS_LIMIT),
+    [activeTasks]
+  );
+
+  // Daily goal: a fixed target of DAILY_GOAL tasks completed *today*, read from
+  // the consistency log (not the whole board's all-time Done count).
+  const goalDone = now
+    ? history[format(now, "yyyy-MM-dd")]?.tasksDone ?? 0
+    : 0;
+  const goalTotal = DAILY_GOAL;
 
   // Action Center: under-prioritised tasks whose deadline is within a week
   // (overdue included). Gated on `now` so the date-relative math runs only on
@@ -835,8 +859,8 @@ export default function HomePage() {
                 Today’s focus
               </h2>
               <span className="rounded-full bg-[var(--c-beige)] px-2.5 py-1 text-[12.5px] font-medium text-[var(--c-dim)]">
-                {rankedTasks.length > FOCUS_LIMIT
-                  ? `Top ${focusTasks.length} of ${rankedTasks.length}`
+                {activeTasks.length > FOCUS_LIMIT
+                  ? `Top ${focusTasks.length} of ${activeTasks.length}`
                   : `${focusTasks.length} ${focusTasks.length === 1 ? "task" : "tasks"}`}
               </span>
             </div>
@@ -859,6 +883,10 @@ export default function HomePage() {
                 />
               ))}
             </div>
+          ) : completedTasks.length > 0 ? (
+            <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-12 text-center text-sm text-[var(--c-dim)]">
+              All caught up — every task is done. ✨
+            </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-12 text-center text-sm text-[var(--c-dim)]">
               Nothing on the board yet.{" "}
@@ -873,6 +901,49 @@ export default function HomePage() {
           {/* Action Center — approaching-deadline alerts */}
           <DeadlineAlerts alerts={alertTasks} onEscalate={escalatePriority} />
         </div>
+
+        {/* Completed Today — collapsible, defaults closed */}
+        {completedTasks.length > 0 && (
+          <section>
+            <button
+              type="button"
+              onClick={() => setShowCompleted((v) => !v)}
+              aria-expanded={showCompleted}
+              className="flex w-full items-center justify-between rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] px-5 py-3.5 text-left shadow-[0_1px_3px_rgba(74,64,54,0.05)] transition-colors hover:bg-[var(--c-beige-2)]"
+            >
+              <div className="flex items-center gap-3">
+                <span className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-md bg-[#6f9e6a] text-white">
+                  <Check className="size-3.5" strokeWidth={3} />
+                </span>
+                <h2 className="font-heading text-base font-semibold text-[var(--c-ink-2)] md:text-lg">
+                  Completed Today
+                </h2>
+                <span className="rounded-full bg-[var(--c-beige)] px-2.5 py-1 text-[12.5px] font-medium text-[var(--c-dim)]">
+                  {completedTasks.length}
+                </span>
+              </div>
+              <ChevronDown
+                className={cn(
+                  "size-5 text-[var(--c-dim)] transition-transform",
+                  showCompleted && "rotate-180"
+                )}
+              />
+            </button>
+
+            {showCompleted && (
+              <div className="mt-2.5 flex flex-col gap-2.5">
+                {completedTasks.map((task) => (
+                  <FocusRow
+                    key={task.id}
+                    task={task}
+                    isActive={task.id === activeTaskId}
+                    onToggle={() => toggle(task.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );

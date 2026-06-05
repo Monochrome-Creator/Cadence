@@ -249,10 +249,17 @@ export interface HistoryStats {
   week: number[];
 }
 
-/** A day counts toward a streak if any focus session or task completion landed. */
+/**
+ * Target number of tasks to complete each day. Drives both the dashboard's
+ * Daily Goal ring and the streak: a day only counts toward the streak once this
+ * many tasks have been marked Done.
+ */
+export const DAILY_GOAL = 3;
+
+/** A day counts toward a streak once the user hits their daily task goal. */
 function isDayActive(history: Record<string, DayActivity>, key: string): boolean {
   const day = history[key];
-  return !!day && (day.sessions > 0 || day.tasksDone > 0);
+  return !!day && day.tasksDone >= DAILY_GOAL;
 }
 
 /** Return a new history with today's `field` incremented by one. */

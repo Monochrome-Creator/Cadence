@@ -87,7 +87,6 @@ export function TimerWidget() {
   const isRunning = useProdStore((state) => state.isRunning);
   const sessionsCompleted = useProdStore((state) => state.sessionsCompleted);
   const completions = useProdStore((state) => state.completions);
-  const activeTaskId = useProdStore((state) => state.activeTaskId);
   const activeTask = useProdStore((state) =>
     state.tasks.find((task) => task.id === state.activeTaskId)
   );
@@ -170,7 +169,7 @@ export function TimerWidget() {
         {isFocus
           ? activeTask
             ? activeTask.title
-            : "No active task selected"
+            : "Standalone focus session"
           : "Step away and recharge"}
       </p>
 
@@ -193,7 +192,6 @@ export function TimerWidget() {
       <div className="flex items-center justify-center gap-2">
         <Button
           size="sm"
-          disabled={isFocus && !activeTaskId}
           onClick={() => (isRunning ? pauseTimer() : handleStart())}
           className={cn(
             "flex-1 text-white disabled:opacity-40",
