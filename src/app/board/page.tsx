@@ -142,12 +142,19 @@ function categoryTheme(category: string): CategoryTheme {
 }
 
 /** Recurrence options + human labels for the row's repeat control. */
-const RECURRENCES: Recurrence[] = ["none", "daily", "weekly", "monthly"];
+const RECURRENCES: Recurrence[] = [
+  "none",
+  "daily",
+  "weekly",
+  "monthly",
+  "quarterly",
+];
 const RECURRENCE_LABELS: Record<Recurrence, string> = {
   none: "No repeat",
   daily: "Daily",
   weekly: "Weekly",
   monthly: "Monthly",
+  quarterly: "Quarterly",
 };
 
 const PILL_TRIGGER =
@@ -991,15 +998,26 @@ function SortableTaskCard({
               )}
             </div>
 
-            {task.subcategory.trim() && (
-              <span
-                title={`Sub-category: ${task.subcategory}`}
-                className="ml-2 inline-flex max-w-full items-center gap-1 self-start truncate rounded-full bg-[var(--c-panel-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]"
-              >
-                <CornerDownRight className="size-3 shrink-0 text-[var(--c-faint)]" />
-                {task.subcategory}
-              </span>
-            )}
+            <div className="ml-2 flex flex-wrap items-center gap-1.5">
+              {task.subcategory.trim() && (
+                <span
+                  title={`Sub-category: ${task.subcategory}`}
+                  className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-[var(--c-panel-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--c-dim)]"
+                >
+                  <CornerDownRight className="size-3 shrink-0 text-[var(--c-faint)]" />
+                  {task.subcategory}
+                </span>
+              )}
+              {task.recurrence !== "none" && (
+                <span
+                  title={`Repeats ${RECURRENCE_LABELS[task.recurrence]}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-[#f6e6da] px-2 py-0.5 text-[11px] font-medium text-[#a35d4d]"
+                >
+                  <Repeat className="size-3 shrink-0" />
+                  {RECURRENCE_LABELS[task.recurrence]}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 

@@ -9,6 +9,7 @@ import {
   Layers,
   LogIn,
   LogOut,
+  Repeat,
   Timer,
 } from "lucide-react";
 
@@ -21,6 +22,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 const NAV_LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/board", label: "Board", icon: LayoutGrid },
+  { href: "/recurring", label: "Scheduled", icon: Repeat },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
 ];
 

@@ -63,7 +63,7 @@ create table if not exists public.tasks (
   category         text not null default 'General',
   subcategory      text not null default '',
   recurrence       text not null default 'none'
-                     check (recurrence in ('none', 'daily', 'weekly', 'monthly')),
+                     check (recurrence in ('none', 'daily', 'weekly', 'monthly', 'quarterly')),
   pomodoros_logged integer not null default 0 check (pomodoros_logged >= 0),
   task_order       integer not null default 0,
   updated_at       timestamptz not null default now()
@@ -72,6 +72,13 @@ create table if not exists public.tasks (
 -- Existing installs: add the subcategory column if it predates this field.
 alter table public.tasks
   add column if not exists subcategory text not null default '';
+
+-- Existing installs: widen the recurrence check to allow 'quarterly'.
+alter table public.tasks
+  drop constraint if exists tasks_recurrence_check;
+alter table public.tasks
+  add constraint tasks_recurrence_check
+    check (recurrence in ('none', 'daily', 'weekly', 'monthly', 'quarterly'));
 
 create index if not exists tasks_user_order_idx
   on public.tasks (user_id, task_order);

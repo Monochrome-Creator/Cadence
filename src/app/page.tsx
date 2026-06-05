@@ -30,6 +30,7 @@ import {
   computeL3Fraction,
   useProdStore,
   type HistoryStats,
+  type Recurrence,
   type Task,
   type TaskPriority,
   type TaskStatus,
@@ -66,6 +67,15 @@ const PRIORITY_RANK: Record<TaskPriority, number> = {
 
 /** How many of the most important tasks the dashboard surfaces at once. */
 const FOCUS_LIMIT = 5;
+
+/** Human labels for the recurrence interval, mirrored from the board. */
+const RECURRENCE_LABELS: Record<Recurrence, string> = {
+  none: "No repeat",
+  daily: "Daily",
+  weekly: "Weekly",
+  monthly: "Monthly",
+  quarterly: "Quarterly",
+};
 
 /** Tasks due within this many days (overdue included) raise a deadline alert. */
 const DEADLINE_ALERT_DAYS = 7;
@@ -414,6 +424,12 @@ function FocusRow({
               <span className="inline-flex items-center gap-1.5">
                 <CalendarDays className="size-3.5 text-[var(--c-faint)]" />
                 {deadline}
+              </span>
+            )}
+            {task.recurrence !== "none" && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[#f6e6da] px-2 py-0.5 text-[11px] font-medium text-[#a35d4d]">
+                <Repeat className="size-3" />
+                {RECURRENCE_LABELS[task.recurrence]}
               </span>
             )}
             {task.subtasks.length > 0 && (

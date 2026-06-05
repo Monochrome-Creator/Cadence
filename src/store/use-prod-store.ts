@@ -33,7 +33,12 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type TaskPriority = "Low" | "Medium" | "High" | "Critical";
 
 /** How often a task repeats. 'none' is a one-off task. */
-export type Recurrence = "none" | "daily" | "weekly" | "monthly";
+export type Recurrence =
+  | "none"
+  | "daily"
+  | "weekly"
+  | "monthly"
+  | "quarterly";
 
 /** Nesting depth of a subtask: L1 (direct child), L2 (grandchild), or L3 (great-grandchild). */
 export type SubtaskLevel = "L1" | "L2" | "L3";
@@ -350,6 +355,11 @@ interface ProdState {
    * click.
    */
   escalatePriority: (id: string) => void;
+  /**
+   * Stops a task from spawning future clones by clearing its recurrence back to
+   * "none" — backs the Scheduled Tasks manager's "Cancel Recurrence" button.
+   */
+  cancelRecurrence: (id: string) => void;
   /** Manually overwrite the logged Pomodoro session count for a task. */
   updateTaskSessions: (taskId: string, newSessionCount: number) => void;
   deleteTask: (id: string) => void;
@@ -554,7 +564,9 @@ function nextDeadline(deadline: string, recurrence: Recurrence): string {
       ? addDays(base, 1)
       : recurrence === "weekly"
         ? addWeeks(base, 1)
-        : addMonths(base, 1);
+        : recurrence === "quarterly"
+          ? addMonths(base, 3)
+          : addMonths(base, 1);
   return format(advanced, "yyyy-MM-dd");
 }
 
@@ -664,6 +676,7 @@ export const useProdStore = create<ProdState>()(
     queueTaskPush(get, [id]);
   },
   escalatePriority: (id) => get().updateTask(id, { priority: "High" }),
+  cancelRecurrence: (id) => get().updateTask(id, { recurrence: "none" }),
   updateTaskSessions: (taskId, newSessionCount) => {
     // Clamp to a non-negative integer — sessions can't be fractional or negative.
     const sessions = Math.max(0, Math.floor(newSessionCount));
