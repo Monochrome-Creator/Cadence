@@ -242,6 +242,12 @@ export interface DayActivity {
   sessions: number;
   /** Tasks marked Done that day. */
   tasksDone: number;
+  /**
+   * Weighted effort points earned that day — the sum of completed tasks'
+   * priority-based point values (see TASK_POINTS). Drives the Daily Goal and
+   * streak. Optional so days logged before this field default to 0.
+   */
+  points?: number;
 }
 
 /** Derived consistency metrics shown on the home dashboard. */
@@ -257,16 +263,37 @@ export interface HistoryStats {
 }
 
 /**
- * Target number of tasks to complete each day. Drives both the dashboard's
- * Daily Goal ring and the streak: a day only counts toward the streak once this
- * many tasks have been marked Done.
+ * Weighted effort points a task is worth when completed, by priority. Higher-
+ * priority work counts for more so the daily goal can't be gamed by clearing a
+ * pile of trivial tasks, while small chores still earn something.
  */
-export const DAILY_GOAL = 3;
+export const TASK_POINTS: Record<TaskPriority, number> = {
+  Critical: 5,
+  High: 3,
+  Medium: 2,
+  Low: 1,
+};
 
-/** A day counts toward a streak once the user hits their daily task goal. */
+/** Effort points a task contributes toward the daily goal / streak. */
+export function taskPoints(priority: TaskPriority): number {
+  return TASK_POINTS[priority];
+}
+
+/**
+ * Daily effort-point target. Drives both the dashboard's Daily Goal ring and
+ * the streak: a day counts toward the streak once this many weighted points
+ * have been earned from completed tasks.
+ */
+export const DAILY_GOAL_POINTS = 10;
+
+/** A day's earned effort points (tolerating legacy days with no `points`). */
+function dayPoints(day: DayActivity | undefined): number {
+  return day?.points ?? 0;
+}
+
+/** A day counts toward a streak once it hits the daily effort-point goal. */
 function isDayActive(history: Record<string, DayActivity>, key: string): boolean {
-  const day = history[key];
-  return !!day && day.tasksDone >= DAILY_GOAL;
+  return dayPoints(history[key]) >= DAILY_GOAL_POINTS;
 }
 
 /** Return a new history with today's `field` incremented by one. */
@@ -275,8 +302,28 @@ function bumpHistory(
   field: keyof DayActivity
 ): Record<string, DayActivity> {
   const key = format(new Date(), "yyyy-MM-dd");
-  const prev = history[key] ?? { sessions: 0, tasksDone: 0 };
-  return { ...history, [key]: { ...prev, [field]: prev[field] + 1 } };
+  const prev = history[key] ?? { sessions: 0, tasksDone: 0, points: 0 };
+  return { ...history, [key]: { ...prev, [field]: (prev[field] ?? 0) + 1 } };
+}
+
+/**
+ * Record a completed task in today's log: bumps the task count by one and adds
+ * its weighted effort points. Both feed the Daily Goal and streak.
+ */
+function logTaskCompletion(
+  history: Record<string, DayActivity>,
+  points: number
+): Record<string, DayActivity> {
+  const key = format(new Date(), "yyyy-MM-dd");
+  const prev = history[key] ?? { sessions: 0, tasksDone: 0, points: 0 };
+  return {
+    ...history,
+    [key]: {
+      ...prev,
+      tasksDone: prev.tasksDone + 1,
+      points: (prev.points ?? 0) + points,
+    },
+  };
 }
 
 /**
@@ -721,15 +768,20 @@ export const useProdStore = create<ProdState>()(
   updateTask: (id, updates) => {
     set((state) => {
       // Log a completion the first time a task transitions into Done.
+      const existing = state.tasks.find((t) => t.id === id);
       const becameDone =
-        updates.status === "Done" &&
-        state.tasks.find((t) => t.id === id)?.status !== "Done";
+        updates.status === "Done" && existing?.status !== "Done";
+      // Credit the task's weighted points using its (possibly just-updated)
+      // priority.
+      const points = existing
+        ? taskPoints(updates.priority ?? existing.priority)
+        : 0;
       return {
         tasks: state.tasks.map((task) =>
           task.id === id ? { ...task, ...updates } : task
         ),
         history: becameDone
-          ? bumpHistory(state.history, "tasksDone")
+          ? logTaskCompletion(state.history, points)
           : state.history,
       };
     });
@@ -879,6 +931,7 @@ export const useProdStore = create<ProdState>()(
 
     // Only log a completion the first time it crosses into Done.
     const becameDone = target.status !== "Done";
+    const points = taskPoints(target.priority);
 
     // A one-off task simply completes — nothing to repeat.
     if (target.recurrence === "none") {
@@ -887,7 +940,7 @@ export const useProdStore = create<ProdState>()(
           t.id === taskId ? { ...t, status: "Done" as TaskStatus } : t
         ),
         history: becameDone
-          ? bumpHistory(state.history, "tasksDone")
+          ? logTaskCompletion(state.history, points)
           : state.history,
       }));
       queueTaskPush(get, [taskId]);
@@ -921,7 +974,7 @@ export const useProdStore = create<ProdState>()(
           repeated,
         ],
         history: becameDone
-          ? bumpHistory(state.history, "tasksDone")
+          ? logTaskCompletion(state.history, points)
           : state.history,
       };
     });
@@ -982,6 +1035,7 @@ export const useProdStore = create<ProdState>()(
   },
   updateSubtask: (taskId, subtaskId, updates) => {
     let becameDone = false;
+    let completedPoints = 0;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
@@ -993,11 +1047,14 @@ export const useProdStore = create<ProdState>()(
         };
         // A change that pushes the roll-up to 100% auto-completes the task.
         const synced = syncStatusToProgress(updated);
-        if (synced.status === "Done" && task.status !== "Done") becameDone = true;
+        if (synced.status === "Done" && task.status !== "Done") {
+          becameDone = true;
+          completedPoints = taskPoints(task.priority);
+        }
         return synced;
       }),
       history: becameDone
-        ? bumpHistory(state.history, "tasksDone")
+        ? logTaskCompletion(state.history, completedPoints)
         : state.history,
     }));
     queueTaskPush(get, [taskId]);
@@ -1047,6 +1104,7 @@ export const useProdStore = create<ProdState>()(
   },
   toggleSubtaskComplete: (taskId, subtaskId) => {
     let becameDone = false;
+    let completedPoints = 0;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
@@ -1072,11 +1130,14 @@ export const useProdStore = create<ProdState>()(
         };
         // Completing the last micro-tasks rolls the parent up to Done.
         const synced = syncStatusToProgress(updated);
-        if (synced.status === "Done" && task.status !== "Done") becameDone = true;
+        if (synced.status === "Done" && task.status !== "Done") {
+          becameDone = true;
+          completedPoints = taskPoints(task.priority);
+        }
         return synced;
       }),
       history: becameDone
-        ? bumpHistory(state.history, "tasksDone")
+        ? logTaskCompletion(state.history, completedPoints)
         : state.history,
     }));
     queueTaskPush(get, [taskId]);

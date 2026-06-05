@@ -29,7 +29,8 @@ import {
 import {
   computeHistoryStats,
   computeL3Fraction,
-  DAILY_GOAL,
+  DAILY_GOAL_POINTS,
+  TASK_POINTS,
   useProdStore,
   type HistoryStats,
   type Recurrence,
@@ -458,11 +459,17 @@ function FocusRow({
         </span>
         <span
           className={cn(
-            "hidden shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-medium md:inline-flex",
+            "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-medium md:inline-flex",
             PRIORITY_PILL[task.priority]
           )}
         >
           {task.priority}
+          <span
+            className="font-mono text-[10px] font-semibold tabular-nums opacity-70"
+            title={`Worth ${TASK_POINTS[task.priority]} effort points`}
+          >
+            +{TASK_POINTS[task.priority]}
+          </span>
         </span>
 
         {/* This Evening toggle — moves the task between day and after-hours */}
@@ -520,12 +527,12 @@ function GoalRingCard({ done, total }: { done: number; total: number }) {
           <b className="text-[var(--c-ink-2)]">
             {done} of {total}
           </b>{" "}
-          focus tasks complete.
+          effort points earned today.
         </p>
         <p className="mt-2 text-[13px] text-[var(--c-dim)]">
           {remaining > 0
-            ? `${remaining} to go — you’re almost there.`
-            : "All done — beautifully paced."}
+            ? `${remaining} pts to go — you’re almost there.`
+            : "Goal hit — beautifully paced."}
         </p>
       </div>
     </div>
@@ -803,12 +810,12 @@ export default function HomePage() {
     [dayTasks]
   );
 
-  // Daily goal: a fixed target of DAILY_GOAL tasks completed *today*, read from
-  // the consistency log (not the whole board's all-time Done count).
+  // Daily goal: a target of DAILY_GOAL_POINTS weighted effort points earned
+  // *today*, read from the consistency log (not the all-time board count).
   const goalDone = now
-    ? history[format(now, "yyyy-MM-dd")]?.tasksDone ?? 0
+    ? history[format(now, "yyyy-MM-dd")]?.points ?? 0
     : 0;
-  const goalTotal = DAILY_GOAL;
+  const goalTotal = DAILY_GOAL_POINTS;
 
   // Action Center: under-prioritised tasks whose deadline is within a week
   // (overdue included). Gated on `now` so the date-relative math runs only on
