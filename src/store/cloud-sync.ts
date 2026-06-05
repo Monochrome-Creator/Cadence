@@ -38,6 +38,8 @@ type TaskRow = {
   task_order: number;
   /** Manual completion percent (0–100); null on rows with no override. */
   progress: number | null;
+  /** True for "This Evening" after-hours tasks. */
+  is_evening: boolean;
 };
 
 type SubtaskRow = {
@@ -201,6 +203,7 @@ function taskToRow(task: Task, userId: string): TaskRow {
     pomodoros_logged: task.pomodorosLogged,
     task_order: task.order,
     progress: task.progress ?? null,
+    is_evening: task.isEvening ?? false,
   };
 }
 
@@ -233,6 +236,8 @@ function rowToTask(row: TaskRow, subtasks: Subtask[]): Task {
     order: row.task_order,
     // Tolerate rows synced before the progress column existed (null/undefined).
     ...(row.progress != null ? { progress: row.progress } : {}),
+    // Tolerate rows synced before the is_evening column existed.
+    ...(row.is_evening ? { isEvening: true } : {}),
     subtasks,
   };
 }

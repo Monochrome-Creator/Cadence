@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Inbox,
   LayoutDashboard,
   LayoutGrid,
   Layers,
@@ -21,6 +22,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 /** Desktop sidebar links. The Pomodoro timer is the widget below, not a link. */
 const NAV_LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutGrid },
   { href: "/recurring", label: "Scheduled", icon: Repeat },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
@@ -33,6 +35,7 @@ const NAV_LINKS = [
  */
 const MOBILE_NAV_LINKS = [
   { href: "/", label: "Home", icon: LayoutDashboard },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutGrid },
   { href: "/timer", label: "Timer", icon: Timer },
   { href: "/flashcards", label: "Flashcards", icon: Layers },

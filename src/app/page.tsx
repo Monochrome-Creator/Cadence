@@ -50,6 +50,7 @@ const STATUS_PILL: Record<TaskStatus, string> = {
   Stuck: "bg-[#f6e0e0] text-[#9b3b3b]",
   Done: "bg-[#e3ece0] text-[#4d7049]",
   "Not Started": "bg-[#efe9e0] text-[#8a7d6b]",
+  Inbox: "bg-[#e9e6f0] text-[#6a5b88]",
 };
 
 const PRIORITY_PILL: Record<TaskPriority, string> = {
@@ -356,6 +357,7 @@ function FocusRow({
   isActive: boolean;
   onToggle: () => void;
 }) {
+  const updateTask = useProdStore((state) => state.updateTask);
   const theme = categoryTheme(task.category);
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
@@ -462,6 +464,24 @@ function FocusRow({
         >
           {task.priority}
         </span>
+
+        {/* This Evening toggle — moves the task between day and after-hours */}
+        {!done && (
+          <button
+            type="button"
+            onClick={() => updateTask(task.id, { isEvening: !task.isEvening })}
+            title={task.isEvening ? "Move to daytime" : "Move to This Evening"}
+            aria-pressed={!!task.isEvening}
+            className={cn(
+              "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+              task.isEvening
+                ? "bg-[#e9e6f0] text-[#6a5b88]"
+                : "text-[var(--c-faint)] hover:bg-[var(--c-beige)] hover:text-[#6a5b88]"
+            )}
+          >
+            <Moon className="size-4" />
+          </button>
+        )}
 
         {/* Pomodoros */}
         <div className="flex shrink-0 items-center gap-1.5 text-[13.5px] text-[var(--c-ink-3)]">
@@ -752,10 +772,12 @@ export default function HomePage() {
     });
   }, [tasks, activeTaskId]);
 
-  // Split active work from finished work: completed tasks leave "Today's focus"
-  // entirely and collect in the "Completed Today" section at the bottom.
+  // Split active work from finished work. Inbox tasks are a separate holding
+  // pen (see /inbox) and never surface on the dashboard. Completed tasks leave
+  // "Today's focus" entirely and collect in the "Completed Today" section.
   const activeTasks = useMemo(
-    () => rankedTasks.filter((t) => t.status !== "Done"),
+    () =>
+      rankedTasks.filter((t) => t.status !== "Done" && t.status !== "Inbox"),
     [rankedTasks]
   );
   const completedTasks = useMemo(
@@ -763,11 +785,22 @@ export default function HomePage() {
     [rankedTasks]
   );
 
-  // Today's focus shows only the most important handful of active tasks — the
+  // Daytime vs. after-hours: evening tasks render under their own "This Evening"
+  // header so workday and after-hours work stay psychologically separate.
+  const dayTasks = useMemo(
+    () => activeTasks.filter((t) => !t.isEvening),
+    [activeTasks]
+  );
+  const eveningTasks = useMemo(
+    () => activeTasks.filter((t) => t.isEvening),
+    [activeTasks]
+  );
+
+  // Today's focus shows only the most important handful of daytime tasks — the
   // rest live on the board (linked below).
   const focusTasks = useMemo(
-    () => activeTasks.slice(0, FOCUS_LIMIT),
-    [activeTasks]
+    () => dayTasks.slice(0, FOCUS_LIMIT),
+    [dayTasks]
   );
 
   // Daily goal: a fixed target of DAILY_GOAL tasks completed *today*, read from
@@ -784,7 +817,7 @@ export default function HomePage() {
     if (!now) return [] as { task: Task; daysLeft: number }[];
     const out: { task: Task; daysLeft: number }[] = [];
     for (const task of tasks) {
-      if (task.status === "Done") continue;
+      if (task.status === "Done" || task.status === "Inbox") continue;
       if (task.priority === "High" || task.priority === "Critical") continue;
       const match = task.deadline?.match(/\d{4}-\d{2}-\d{2}/);
       if (!match) continue;
@@ -859,8 +892,8 @@ export default function HomePage() {
                 Today’s focus
               </h2>
               <span className="rounded-full bg-[var(--c-beige)] px-2.5 py-1 text-[12.5px] font-medium text-[var(--c-dim)]">
-                {activeTasks.length > FOCUS_LIMIT
-                  ? `Top ${focusTasks.length} of ${activeTasks.length}`
+                {dayTasks.length > FOCUS_LIMIT
+                  ? `Top ${focusTasks.length} of ${dayTasks.length}`
                   : `${focusTasks.length} ${focusTasks.length === 1 ? "task" : "tasks"}`}
               </span>
             </div>
@@ -883,6 +916,10 @@ export default function HomePage() {
                 />
               ))}
             </div>
+          ) : eveningTasks.length > 0 ? (
+            // Daytime list is clear but evening work remains — skip the empty
+            // state and let the "This Evening" block below carry the section.
+            null
           ) : completedTasks.length > 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-12 text-center text-sm text-[var(--c-dim)]">
               All caught up — every task is done. ✨
@@ -894,6 +931,31 @@ export default function HomePage() {
                 Add your first task
               </Link>
               .
+            </div>
+          )}
+
+          {/* This Evening — after-hours tasks, set apart from the day's focus */}
+          {eveningTasks.length > 0 && (
+            <div className="mt-6">
+              <div className="mb-3 flex items-center gap-2.5 border-t border-dashed border-[var(--c-line)] pt-5">
+                <Moon className="size-4 text-[#6a5b88]" />
+                <h3 className="text-[13px] font-semibold tracking-[0.04em] text-[var(--c-dim)] uppercase">
+                  This Evening
+                </h3>
+                <span className="rounded-full bg-[#e9e6f0] px-2 py-0.5 text-[11px] font-medium text-[#6a5b88]">
+                  {eveningTasks.length}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2.5">
+                {eveningTasks.map((task) => (
+                  <FocusRow
+                    key={task.id}
+                    task={task}
+                    isActive={task.id === activeTaskId}
+                    onToggle={() => toggle(task.id)}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </section>

@@ -89,6 +89,7 @@ const STATUS_PILL: Record<TaskStatus, string> = {
   Stuck: "bg-[#f6e0e0] text-[#9b3b3b]",
   Done: "bg-[#e3ece0] text-[#4d7049]",
   "Not Started": "bg-[#efe9e0] text-[#8a7d6b]",
+  Inbox: "bg-[#e9e6f0] text-[#6a5b88]",
 };
 
 const PRIORITY_PILL: Record<TaskPriority, string> = {
@@ -1498,10 +1499,13 @@ export default function BoardPage() {
     categorySort === "none";
 
   const visibleTasks = useMemo(() => {
+    // Inbox tasks are a separate holding pen (see /inbox) and never appear on
+    // the board until the user promotes them to another status.
+    const boardTasks = tasks.filter((task) => task.status !== "Inbox");
     const filtered =
       statusFilter === "all"
-        ? tasks
-        : tasks.filter((task) => task.status === statusFilter);
+        ? boardTasks
+        : boardTasks.filter((task) => task.status === statusFilter);
 
     // Category sort takes precedence when active. Group by main category, then
     // by sub-category so related jobs cluster together as you scroll.
@@ -1748,11 +1752,13 @@ export default function BoardPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                {TASK_STATUSES.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {status}
-                  </SelectItem>
-                ))}
+                {TASK_STATUSES.filter((status) => status !== "Inbox").map(
+                  (status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  )
+                )}
               </SelectContent>
             </Select>
 

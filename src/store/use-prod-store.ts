@@ -26,6 +26,7 @@ export const TASK_STATUSES = [
   "Stuck",
   "Done",
   "Not Started",
+  "Inbox",
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -83,6 +84,12 @@ export interface Task {
    * created before this field, treated as 0.
    */
   progress?: number;
+  /**
+   * When true, the task is an "after-hours" item — surfaced under a separate
+   * "This Evening" header on the dashboard to keep workday and evening work
+   * psychologically apart. Undefined/false means a normal daytime task.
+   */
+  isEvening?: boolean;
   subtasks: Subtask[];
 }
 

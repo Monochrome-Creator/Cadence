@@ -7,6 +7,7 @@ import { ConnectionStatus } from "@/components/connection-status";
 import { DebugPanel } from "@/components/debug-panel";
 import { NotificationManager } from "@/components/notification-manager";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
+import { QuickAddModal } from "@/components/quick-add-modal";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -69,6 +70,7 @@ export default function RootLayout({
         <ConnectionStatus />
         <DebugPanel />
         <PwaInstallPrompt />
+        <QuickAddModal />
         <Sidebar />
         <main className="h-[calc(100vh-1rem)] min-w-0 flex-1 overflow-x-hidden overflow-y-auto pb-24 md:h-[calc(100vh-1.5rem)] md:pb-0">
           {children}

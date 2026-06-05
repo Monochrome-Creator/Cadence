@@ -22,6 +22,7 @@
 --   Task.recurrence      -> tasks.recurrence       text  (Recurrence union)
 --   Task.pomodorosLogged -> tasks.pomodoros_logged integer
 --   Task.order           -> tasks.task_order       integer ("order" is reserved)
+--   Task.isEvening       -> tasks.is_evening       boolean (This Evening split)
 --   Subtask.id           -> subtasks.id            text
 --   Subtask.title        -> subtasks.title         text
 --   Subtask.status       -> subtasks.status        text  (SubtaskStatus union)
@@ -56,7 +57,7 @@ create table if not exists public.tasks (
   user_id          uuid not null references public.users (id) on delete cascade,
   title            text not null default '',
   status           text not null default 'Not Started'
-                     check (status in ('Working on it', 'Stuck', 'Done', 'Not Started')),
+                     check (status in ('Working on it', 'Stuck', 'Done', 'Not Started', 'Inbox')),
   priority         text not null default 'Medium'
                      check (priority in ('Low', 'Medium', 'High', 'Critical')),
   deadline         text not null default '',
@@ -69,6 +70,9 @@ create table if not exists public.tasks (
   -- Manual completion percent (0–100); null when the task derives progress from
   -- its micro-tasks instead of a manual override.
   progress         integer check (progress is null or (progress >= 0 and progress <= 100)),
+  -- "This Evening" flag: surfaces the task under a separate after-hours header
+  -- on the dashboard. Defaults false (a normal daytime task).
+  is_evening       boolean not null default false,
   updated_at       timestamptz not null default now()
 );
 
@@ -82,6 +86,17 @@ alter table public.tasks
 alter table public.tasks
   add constraint tasks_recurrence_check
     check (recurrence in ('none', 'daily', 'weekly', 'monthly', 'quarterly'));
+
+-- Existing installs: widen the status check to allow the 'Inbox' holding pen.
+alter table public.tasks
+  drop constraint if exists tasks_status_check;
+alter table public.tasks
+  add constraint tasks_status_check
+    check (status in ('Working on it', 'Stuck', 'Done', 'Not Started', 'Inbox'));
+
+-- Existing installs: add the "This Evening" after-hours flag.
+alter table public.tasks
+  add column if not exists is_evening boolean not null default false;
 
 -- Existing installs: add the manual completion-percent override column.
 alter table public.tasks
