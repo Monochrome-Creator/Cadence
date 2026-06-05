@@ -2,9 +2,15 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { format, isValid, parseISO } from "date-fns";
+import {
+  differenceInCalendarDays,
+  format,
+  isValid,
+  parseISO,
+} from "date-fns";
 import {
   ArrowRight,
+  ArrowUp,
   CalendarDays,
   Check,
   Flame,
@@ -16,6 +22,7 @@ import {
   Sun,
   Target,
   Timer,
+  TriangleAlert,
 } from "lucide-react";
 
 import {
@@ -59,6 +66,9 @@ const PRIORITY_RANK: Record<TaskPriority, number> = {
 
 /** How many of the most important tasks the dashboard surfaces at once. */
 const FOCUS_LIMIT = 5;
+
+/** Tasks due within this many days (overdue included) raise a deadline alert. */
+const DEADLINE_ALERT_DAYS = 7;
 
 type CategoryTheme = { pill: string; spine: string; tint: string };
 
@@ -566,10 +576,110 @@ const EMPTY_HISTORY_STATS: HistoryStats = {
   week: [0, 0, 0, 0, 0, 0, 0],
 };
 
+/* -------------------------------------------------------------------------- */
+/*                   Action Center — approaching deadlines                    */
+/* -------------------------------------------------------------------------- */
+
+/** Human label for how much runway a task has left (overdue included). */
+function deadlineLabel(daysLeft: number): string {
+  if (daysLeft < 0) {
+    const n = Math.abs(daysLeft);
+    return `${n} day${n === 1 ? "" : "s"} overdue`;
+  }
+  if (daysLeft === 0) return "Due today";
+  if (daysLeft === 1) return "Due tomorrow";
+  return `${daysLeft} days left`;
+}
+
+/**
+ * Right-rail alert column: under-prioritised tasks closing in on (or past)
+ * their deadline, each with a one-click escalate to High.
+ */
+function DeadlineAlerts({
+  alerts,
+  onEscalate,
+}: {
+  alerts: { task: Task; daysLeft: number }[];
+  onEscalate: (id: string) => void;
+}) {
+  return (
+    <aside className="lg:col-span-1">
+      <div className="mb-3.5 flex items-center gap-2">
+        <TriangleAlert className="size-[18px] text-[#a35d4d]" />
+        <h2 className="font-heading text-xl font-semibold text-[var(--c-ink-2)] md:text-[22px]">
+          Approaching Deadlines
+        </h2>
+        {alerts.length > 0 && (
+          <span className="rounded-full bg-[#f4dede] px-2 py-0.5 text-[12px] font-semibold text-[#9b3b3b]">
+            {alerts.length}
+          </span>
+        )}
+      </div>
+
+      {alerts.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] px-4 py-10 text-center text-[13px] text-[var(--c-dim)]">
+          Nothing urgent. Low-priority tasks due within {DEADLINE_ALERT_DAYS}{" "}
+          days surface here.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          {alerts.map(({ task, daysLeft }) => {
+            const overdue = daysLeft < 0;
+            return (
+              <div
+                key={task.id}
+                className={cn(
+                  "rounded-2xl border border-l-4 p-3.5 shadow-[0_1px_4px_rgba(74,64,54,0.05)]",
+                  overdue
+                    ? "border-[#e7c4c4] border-l-[#c2453f] bg-[#fbeaea]"
+                    : "border-[#ecd9bf] border-l-[#cf9442] bg-[#fbf2e2]"
+                )}
+              >
+                <p className="line-clamp-2 text-[14px] font-semibold text-[var(--c-ink-2)]">
+                  {task.title || "Untitled task"}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold",
+                      overdue
+                        ? "bg-[#f4dede] text-[#9b3b3b]"
+                        : "bg-[#f3e7d0] text-[#8a6d3b]"
+                    )}
+                  >
+                    <CalendarDays className="size-3" />
+                    {deadlineLabel(daysLeft)}
+                  </span>
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                      PRIORITY_PILL[task.priority]
+                    )}
+                  >
+                    {task.priority}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onEscalate(task.id)}
+                  className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#a35d4d] px-3 py-2 text-[12.5px] font-semibold text-white shadow-[0_1px_2px_rgba(74,64,54,0.12)] transition-colors hover:bg-[#8f4f41] active:bg-[#7c453a]"
+                >
+                  <ArrowUp className="size-3.5" /> Escalate to High
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </aside>
+  );
+}
+
 export default function HomePage() {
   const tasks = useProdStore((state) => state.tasks);
   const activeTaskId = useProdStore((state) => state.activeTaskId);
   const setActiveTask = useProdStore((state) => state.setActiveTask);
+  const escalatePriority = useProdStore((state) => state.escalatePriority);
   const sessionsCompleted = useProdStore((state) => state.sessionsCompleted);
   const history = useProdStore((state) => state.history);
 
@@ -627,12 +737,31 @@ export default function HomePage() {
   const goalDone = tasks.filter((t) => t.status === "Done").length;
   const goalTotal = tasks.length;
 
+  // Action Center: under-prioritised tasks whose deadline is within a week
+  // (overdue included). Gated on `now` so the date-relative math runs only on
+  // the client and never mismatches the server render.
+  const alertTasks = useMemo(() => {
+    if (!now) return [] as { task: Task; daysLeft: number }[];
+    const out: { task: Task; daysLeft: number }[] = [];
+    for (const task of tasks) {
+      if (task.status === "Done") continue;
+      if (task.priority === "High" || task.priority === "Critical") continue;
+      const match = task.deadline?.match(/\d{4}-\d{2}-\d{2}/);
+      if (!match) continue;
+      const due = parseISO(match[0]);
+      if (!isValid(due)) continue;
+      const daysLeft = differenceInCalendarDays(due, now);
+      if (daysLeft <= DEADLINE_ALERT_DAYS) out.push({ task, daysLeft });
+    }
+    return out.sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [tasks, now]);
+
   const toggle = (id: string) =>
     setActiveTask(activeTaskId === id ? null : id);
 
   return (
     <div className="px-5 py-7 md:px-8 md:py-10">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6 md:gap-[22px]">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 md:gap-[22px]">
         {/* Greeting header */}
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
@@ -680,8 +809,10 @@ export default function HomePage() {
           />
         </section>
 
+        {/* Focus board + Action Center sidebar */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Today's focus */}
-        <section>
+        <section className="lg:col-span-2">
           <div className="mb-3.5 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h2 className="font-heading text-xl font-semibold whitespace-nowrap text-[var(--c-ink-2)] md:text-[22px]">
@@ -722,6 +853,10 @@ export default function HomePage() {
             </div>
           )}
         </section>
+
+          {/* Action Center — approaching-deadline alerts */}
+          <DeadlineAlerts alerts={alertTasks} onEscalate={escalatePriority} />
+        </div>
       </div>
     </div>
   );

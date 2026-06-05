@@ -344,6 +344,12 @@ interface ProdState {
       Partial<Pick<Task, "category" | "subcategory" | "recurrence">>
   ) => void;
   updateTask: (id: string, updates: Partial<Omit<Task, "id">>) => void;
+  /**
+   * Bumps a task straight to "High" priority — used by the dashboard's
+   * Approaching Deadlines alerts to escalate an under-prioritised task in one
+   * click.
+   */
+  escalatePriority: (id: string) => void;
   /** Manually overwrite the logged Pomodoro session count for a task. */
   updateTaskSessions: (taskId: string, newSessionCount: number) => void;
   deleteTask: (id: string) => void;
@@ -657,6 +663,7 @@ export const useProdStore = create<ProdState>()(
     });
     queueTaskPush(get, [id]);
   },
+  escalatePriority: (id) => get().updateTask(id, { priority: "High" }),
   updateTaskSessions: (taskId, newSessionCount) => {
     // Clamp to a non-negative integer — sessions can't be fractional or negative.
     const sessions = Math.max(0, Math.floor(newSessionCount));
