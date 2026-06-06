@@ -29,16 +29,6 @@ export default function Error({
           We hit an unexpected snag. You can try again, and if it keeps
           happening, refresh the page.
         </p>
-        {/* TEMPORARY DIAGNOSTIC: surface the raw error on-screen (incl. mobile)
-            so production failures can be read without devtools. Remove once the
-            underlying issue is identified. */}
-        <pre className="mt-4 max-h-48 w-full overflow-auto rounded-lg border-2 border-red-500 bg-red-50 px-3 py-2 text-left text-xs break-words whitespace-pre-wrap text-red-900">
-          <strong className="block text-red-700">DEBUG · error.message</strong>
-          {error.message || "(empty)"}
-          {"\n\n"}
-          <strong className="block text-red-700">error.digest</strong>
-          {error.digest || "(none)"}
-        </pre>
         <Button
           onClick={() => unstable_retry()}
           className="mt-6 bg-[#a35d4d] text-white hover:bg-[#8f4f41]"

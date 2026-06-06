@@ -35,8 +35,8 @@ const NAV_LINKS = [
  */
 const MOBILE_NAV_LINKS = [
   { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutGrid },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/timer", label: "Timer", icon: Timer },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
 ];
