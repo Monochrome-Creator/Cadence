@@ -680,8 +680,8 @@ function DeadlineAlerts({
                 className={cn(
                   "rounded-2xl border border-l-4 p-3.5 shadow-[0_1px_4px_rgba(74,64,54,0.05)]",
                   overdue
-                    ? "border-[#e7c4c4] border-l-[#c2453f] bg-[#fbeaea]"
-                    : "border-[#ecd9bf] border-l-[#cf9442] bg-[#fbf2e2]"
+                    ? "border-[#e7c4c4] border-l-[#c2453f] bg-[#fbeaea] dark:border-[#5e3433] dark:bg-[#34211f]"
+                    : "border-[#ecd9bf] border-l-[#cf9442] bg-[#fbf2e2] dark:border-[#5a4a2c] dark:bg-[#2f2719]"
                 )}
               >
                 <p className="line-clamp-2 text-[14px] font-semibold text-[var(--c-ink-2)]">
@@ -692,8 +692,8 @@ function DeadlineAlerts({
                     className={cn(
                       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold",
                       overdue
-                        ? "bg-[#f4dede] text-[#9b3b3b]"
-                        : "bg-[#f3e7d0] text-[#8a6d3b]"
+                        ? "bg-[#f4dede] text-[#9b3b3b] dark:bg-[#4a2a2a] dark:text-[#e9b6b6]"
+                        : "bg-[#f3e7d0] text-[#8a6d3b] dark:bg-[#433719] dark:text-[#e2c489]"
                     )}
                   >
                     <CalendarDays className="size-3" />
