@@ -22,8 +22,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 /** Desktop sidebar links. The Pomodoro timer is the widget below, not a link. */
 const NAV_LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/board", label: "Board", icon: LayoutGrid },
+  { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/recurring", label: "Scheduled", icon: Repeat },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
 ];
