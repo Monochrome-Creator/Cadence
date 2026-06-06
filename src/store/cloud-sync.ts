@@ -149,6 +149,72 @@ function isAuthError(error: unknown): boolean {
   return msg.includes("jwt") || msg.includes("expired");
 }
 
+/* ------------------------ failure classification ------------------------- */
+
+/** Why a cloud write failed — drives whether the UI shows "offline". */
+export type SyncFailureReason = "network" | "auth" | "data" | "unavailable";
+
+/** Structured result of a cloud write so callers can react per failure kind. */
+export type SyncOutcome =
+  | { ok: true }
+  | { ok: false; reason: SyncFailureReason; message?: string };
+
+/**
+ * A genuine network drop is the ONLY thing that should put the app in "offline"
+ * mode. It surfaces as the browser fetch's `TypeError: Failed to fetch` (or our
+ * own "timed out" sentinel from withTimeout). Auth (401/RLS) and schema/data
+ * errors come back as real HTTP responses — the device is online, the request
+ * was rejected — so they must NOT be treated as offline.
+ */
+function isNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) return true; // "Failed to fetch"
+  if (error instanceof Error) {
+    const m = error.message.toLowerCase();
+    return (
+      m.includes("failed to fetch") ||
+      m.includes("timed out") ||
+      m.includes("networkerror") ||
+      m.includes("network request failed")
+    );
+  }
+  return false;
+}
+
+/** Buckets any thrown/returned error into a sync-failure reason. */
+function classifyError(error: unknown): SyncFailureReason {
+  if (isNetworkError(error)) return "network";
+  if (isAuthError(error)) return "auth";
+  return "data";
+}
+
+/** Best human-readable string from a PostgrestError or thrown Error. */
+function errorMessage(error: unknown): string {
+  const e = error as { message?: string; details?: string; code?: string };
+  return e?.message || e?.details || e?.code || "Unknown sync error";
+}
+
+/**
+ * Logs the *real* Supabase error. PostgrestError's fields are non-enumerable, so
+ * a plain `console.error(label, error)` prints `{}` — we pull message/details/
+ * hint/code explicitly so the cause (RLS vs auth vs schema) is visible.
+ */
+function logSupabaseError(label: string, error: unknown): void {
+  const e = (error ?? {}) as {
+    message?: string;
+    details?: string;
+    hint?: string;
+    code?: string;
+    status?: number;
+  };
+  console.error(`[cadence] ${label} failed`, {
+    message: e.message ?? null,
+    details: e.details ?? null,
+    hint: e.hint ?? null,
+    code: e.code ?? null,
+    status: e.status ?? null,
+  });
+}
+
 /**
  * Runs a Supabase write and, if it fails because the token expired, forces one
  * session refresh and retries exactly once. `run` must build a fresh query each
@@ -389,13 +455,13 @@ export async function ensureUserRow(
  * the UI: returns `true` when the round-trip fully succeeded, `false` when sync
  * is unavailable or any write failed/timed out (so callers can show "offline").
  */
-export async function pushTasks(tasks: Task[]): Promise<boolean> {
+export async function pushTasks(tasks: Task[]): Promise<SyncOutcome> {
   const supabase = getSupabaseClient();
-  if (!supabase || tasks.length === 0) return false;
+  if (!supabase || tasks.length === 0) return { ok: false, reason: "unavailable" };
 
   try {
     const userId = await getUserId(supabase);
-    if (!userId) return false;
+    if (!userId) return { ok: false, reason: "unavailable" };
 
     const taskRows = tasks.map((task) => taskToRow(task, userId));
     // The first write of the batch carries auth-retry: if the token expired
@@ -409,13 +475,19 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
     if (taskErr) {
       if (isMissingTable(taskErr)) {
         console.warn("[cadence] tasks table not found —", SCHEMA_HINT);
-      } else {
-        console.error("[cadence] push tasks failed", taskErr);
+        return { ok: false, reason: "data", message: `Tables not found. ${SCHEMA_HINT}` };
       }
-      return false;
+      logSupabaseError("push tasks", taskErr);
+      return {
+        ok: false,
+        reason: classifyError(taskErr),
+        message: errorMessage(taskErr),
+      };
     }
 
-    let ok = true;
+    // Track the first non-network failure across subtask writes/prunes so the
+    // caller still learns the real reason even though the task row itself saved.
+    let failure: SyncOutcome | null = null;
 
     const subtaskRows = tasks.flatMap((task) =>
       task.subtasks.map((subtask, index) =>
@@ -429,10 +501,12 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
         "push subtasks"
       );
       if (subErr) {
-        if (!isMissingTable(subErr)) {
-          console.error("[cadence] push subtasks failed", subErr);
-        }
-        ok = false;
+        if (!isMissingTable(subErr)) logSupabaseError("push subtasks", subErr);
+        failure ??= {
+          ok: false,
+          reason: classifyError(subErr),
+          message: errorMessage(subErr),
+        };
       }
     }
 
@@ -458,18 +532,25 @@ export async function pushTasks(tasks: Task[]): Promise<boolean> {
         "prune subtasks"
       );
       if (delErr) {
-        if (!isMissingTable(delErr)) {
-          console.error("[cadence] prune subtasks failed", delErr);
-        }
-        ok = false;
+        if (!isMissingTable(delErr)) logSupabaseError("prune subtasks", delErr);
+        failure ??= {
+          ok: false,
+          reason: classifyError(delErr),
+          message: errorMessage(delErr),
+        };
       }
     }
 
-    return ok;
+    return failure ?? { ok: true };
   } catch (error) {
-    // Network failure / timeout — fail soft so the UI can show "offline".
-    console.error("[cadence] push tasks threw", error);
-    return false;
+    // Thrown (vs returned) error — almost always a network drop/timeout, but
+    // classify so a non-network throw isn't mislabelled offline.
+    logSupabaseError("push tasks threw", error);
+    return {
+      ok: false,
+      reason: classifyError(error),
+      message: errorMessage(error),
+    };
   }
 }
 
@@ -526,9 +607,9 @@ export async function pushCategories(categories: string[]): Promise<void> {
  * Deletes a task (subtasks cascade via the FK) from the cloud. Returns `true`
  * on success, `false` when sync is off or the delete failed/timed out.
  */
-export async function deleteTaskRemote(taskId: string): Promise<boolean> {
+export async function deleteTaskRemote(taskId: string): Promise<SyncOutcome> {
   const supabase = getSupabaseClient();
-  if (!supabase) return false;
+  if (!supabase) return { ok: false, reason: "unavailable" };
   try {
     const { error } = await withAuthRetry(
       supabase,
@@ -536,15 +617,16 @@ export async function deleteTaskRemote(taskId: string): Promise<boolean> {
       "delete task"
     );
     if (error) {
-      if (!isMissingTable(error)) {
-        console.error("[cadence] delete task failed", error);
+      if (isMissingTable(error)) {
+        return { ok: false, reason: "data", message: `Tables not found. ${SCHEMA_HINT}` };
       }
-      return false;
+      logSupabaseError("delete task", error);
+      return { ok: false, reason: classifyError(error), message: errorMessage(error) };
     }
-    return true;
+    return { ok: true };
   } catch (error) {
-    console.error("[cadence] delete task threw", error);
-    return false;
+    logSupabaseError("delete task threw", error);
+    return { ok: false, reason: classifyError(error), message: errorMessage(error) };
   }
 }
 

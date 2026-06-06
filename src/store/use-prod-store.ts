@@ -19,6 +19,7 @@ import {
   pullTasks,
   pushCategories,
   pushTasks,
+  type SyncOutcome,
 } from "./cloud-sync";
 
 export const TASK_STATUSES = [
@@ -381,9 +382,12 @@ export function computeHistoryStats(
  * Cloud connection state surfaced by the UI status dot:
  *  - "synced"     — last cloud round-trip succeeded.
  *  - "connecting" — a pull/push is in flight.
- *  - "offline"    — cloud disabled, signed out, or the last request failed.
+ *  - "offline"    — cloud disabled, signed out, or an actual network drop.
+ *  - "error"      — the server rejected the write (auth/RLS/schema). The device
+ *                   is online; the request failed. Distinct from "offline" so a
+ *                   401/403 never masquerades as a network outage.
  */
-export type ConnectionStatus = "synced" | "connecting" | "offline";
+export type ConnectionStatus = "synced" | "connecting" | "offline" | "error";
 
 /* -------------------------------------------------------------------------- */
 /*                               Pomodoro engine                              */
@@ -429,8 +433,10 @@ interface ProdState {
   isHydrated: boolean;
   /** True while a pull/push round-trip is in flight. */
   isSyncing: boolean;
-  /** Tri-state cloud connection status driving the header status dot. */
+  /** Cloud connection status driving the header status dot. */
   connectionStatus: ConnectionStatus;
+  /** Last server-side sync error message (null when none) — shown when status is "error". */
+  lastSyncError: string | null;
 
   // Timer
   mode: TimerMode;
@@ -688,6 +694,30 @@ function nextDeadline(deadline: string, recurrence: Recurrence): string {
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingTaskIds = new Set<string>();
 
+/**
+ * Maps a cloud-write {@link SyncOutcome} onto the connection status.
+ *
+ * The key fix: a server rejection (auth/RLS/schema) is NOT a network outage.
+ * Only a real network drop (or signed-out/unconfigured) flips the dot to
+ * "offline"; auth/data rejections become the distinct "error" status so a
+ * 401/403 can never masquerade as "Offline" — and the real message is kept in
+ * `lastSyncError` for display/diagnosis.
+ */
+function applyPushOutcome(outcome: SyncOutcome): void {
+  if (outcome.ok) {
+    useProdStore.setState({ connectionStatus: "synced", lastSyncError: null });
+    return;
+  }
+  if (outcome.reason === "network" || outcome.reason === "unavailable") {
+    useProdStore.setState({ connectionStatus: "offline" });
+  } else {
+    useProdStore.setState({
+      connectionStatus: "error",
+      lastSyncError: outcome.message ?? "Sync failed",
+    });
+  }
+}
+
 function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
   if (!isSupabaseConfigured) return;
   for (const id of taskIds) pendingTaskIds.add(id);
@@ -699,9 +729,7 @@ function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
     const tasks = getState().tasks.filter((task) => ids.has(task.id));
     if (tasks.length === 0) return;
     useProdStore.setState({ connectionStatus: "connecting" });
-    void pushTasks(tasks).then((ok) =>
-      useProdStore.setState({ connectionStatus: ok ? "synced" : "offline" })
-    );
+    void pushTasks(tasks).then(applyPushOutcome);
   }, 400);
 }
 
@@ -734,6 +762,7 @@ export const useProdStore = create<ProdState>()(
   // Start "connecting" when cloud is on (hydrate runs at mount); otherwise the
   // app is purely local, which we surface as "offline" (on-device data).
   connectionStatus: isSupabaseConfigured ? "connecting" : "offline",
+  lastSyncError: null,
 
   mode: "focus",
   timeLeft: TIMER_DURATIONS.focus,
@@ -808,9 +837,7 @@ export const useProdStore = create<ProdState>()(
     }));
     if (isSupabaseConfigured) {
       set({ connectionStatus: "connecting" });
-      void deleteTaskRemote(id).then((ok) =>
-        set({ connectionStatus: ok ? "synced" : "offline" })
-      );
+      void deleteTaskRemote(id).then(applyPushOutcome);
     }
   },
   reorderTasks: (activeId, overId) => {
@@ -1168,11 +1195,12 @@ export const useProdStore = create<ProdState>()(
         set({ tasks: cloudTasks });
       } else if (get().tasks.length > 0) {
         // First run with local tasks: seed the cloud. If this fails (e.g.
-        // users FK row not yet created), report offline so the user knows
-        // their tasks haven't been synced yet — don't show a false "Synced".
-        const ok = await pushTasks(get().tasks);
-        if (!ok) {
-          set({ connectionStatus: "offline" });
+        // users FK row not yet created), surface the real reason — a network
+        // drop shows "offline", an auth/schema rejection shows "error" — so we
+        // never display a false "Synced" nor a false "Offline".
+        const outcome = await pushTasks(get().tasks);
+        if (!outcome.ok) {
+          applyPushOutcome(outcome);
           return;
         }
       }
@@ -1215,7 +1243,13 @@ export const useProdStore = create<ProdState>()(
         const ids = new Set(pendingTaskIds);
         pendingTaskIds.clear();
         const pending = get().tasks.filter((t) => ids.has(t.id));
-        if (pending.length > 0) await pushTasks(pending);
+        if (pending.length > 0) {
+          const outcome = await pushTasks(pending);
+          if (!outcome.ok) {
+            applyPushOutcome(outcome);
+            return;
+          }
+        }
       }
 
       await ensureUserRow();
@@ -1230,9 +1264,9 @@ export const useProdStore = create<ProdState>()(
         set({ tasks: cloudTasks });
       } else if (get().tasks.length > 0) {
         // Cloud is empty — seed it from local so nothing is lost.
-        const ok = await pushTasks(get().tasks);
-        if (!ok) {
-          set({ connectionStatus: "offline" });
+        const outcome = await pushTasks(get().tasks);
+        if (!outcome.ok) {
+          applyPushOutcome(outcome);
           return;
         }
       }

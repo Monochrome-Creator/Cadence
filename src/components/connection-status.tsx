@@ -24,10 +24,14 @@ const STATUS_CONFIG = {
   synced: { dot: "bg-emerald-500", label: "Synced", pulse: false },
   connecting: { dot: "bg-amber-500", label: "Syncing…", pulse: true },
   offline: { dot: "bg-rose-500", label: "Offline", pulse: false },
+  // Distinct from "offline": the device is online but the server rejected the
+  // write (auth/RLS/schema). Orange so it reads as "attention" not "no network".
+  error: { dot: "bg-orange-500", label: "Sync error", pulse: false },
 } as const;
 
 export function ConnectionStatus() {
   const status = useProdStore((state) => state.connectionStatus);
+  const lastSyncError = useProdStore((state) => state.lastSyncError);
   const forceSync = useProdStore((state) => state.forceSync);
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -91,8 +95,13 @@ export function ConnectionStatus() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 mt-2 w-48 overflow-hidden rounded-xl border border-[var(--c-line)] bg-[var(--c-panel)] p-1 shadow-[0_8px_30px_rgba(74,64,54,0.18)]"
+          className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-[var(--c-line)] bg-[var(--c-panel)] p-1 shadow-[0_8px_30px_rgba(74,64,54,0.18)]"
         >
+          {status === "error" && lastSyncError && (
+            <p className="m-1 rounded-lg bg-orange-50 px-3 py-2 text-[11px] leading-snug break-words text-orange-900">
+              {lastSyncError}
+            </p>
+          )}
           <button
             type="button"
             role="menuitem"
