@@ -162,7 +162,7 @@ const PILL_TRIGGER =
   "h-auto w-auto justify-center gap-1 rounded-full border-0 px-3 py-2 text-xs font-medium shadow-none md:w-full md:py-1";
 
 const GRID_COLS =
-  "md:grid-cols-[minmax(0,1fr)_120px_108px_120px_128px_84px_76px]";
+  "md:grid-cols-[minmax(240px,1.4fr)_108px_100px_108px_120px_76px_68px]";
 
 /** Human-readable deadline: "29 May 2026" (two-digit day, abbr month, full year). */
 const DEADLINE_FORMAT = "dd MMM yyyy";
@@ -1723,7 +1723,7 @@ export default function BoardPage() {
 
   return (
     <div className="px-8 py-10">
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-6xl">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="font-heading text-3xl font-semibold tracking-tight text-[var(--c-ink-2)] md:text-4xl">
