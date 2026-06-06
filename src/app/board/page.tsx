@@ -992,7 +992,9 @@ function SortableTaskCard({
             aria-label="Drag to reorder"
             disabled={!dragEnabled}
             className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-line-strong)] transition-colors",
+              // Hidden on mobile: a 24px touch-drag handle is impractical and
+              // crowds the title. Reordering stays available on desktop.
+              "hidden size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-line-strong)] transition-colors md:flex",
               dragEnabled
                 ? "cursor-grab hover:bg-[var(--c-beige)] hover:text-[var(--c-dim)] active:cursor-grabbing"
                 : "cursor-not-allowed opacity-30"

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import {
   differenceInCalendarDays,
@@ -17,6 +23,7 @@ import {
   Flame,
   Layers,
   Moon,
+  Pencil,
   Play,
   Plus,
   Repeat,
@@ -167,11 +174,21 @@ function fmtFocus(min: number): string {
 }
 
 /**
- * Friendly first name for the greeting. Uses the signed-in email's local part
- * when cloud auth is on; otherwise stays a warm, neutral default.
+ * Friendly name for the greeting. Prefers a user-set display name (stored in
+ * Supabase auth `user_metadata.display_name`, so it follows the account across
+ * devices with no schema change), then falls back to the email's local part,
+ * then a warm neutral default. `saveName` persists an edited name; `canEdit`
+ * is true only once a real session is confirmed.
  */
-function useGreetingName(): string {
-  const [name, setName] = useState("there");
+function useGreetingName(): {
+  name: string;
+  editableValue: string;
+  canEdit: boolean;
+  saveName: (next: string) => void;
+} {
+  const [fallback, setFallback] = useState("there");
+  const [custom, setCustom] = useState<string | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -180,17 +197,35 @@ function useGreetingName(): string {
     supabase.auth
       .getUser()
       .then(({ data }) => {
-        const email = data.user?.email;
-        if (!email) return;
-        const local = email.split("@")[0].replace(/[._-]+/g, " ").trim();
-        if (local) setName(local.charAt(0).toUpperCase() + local.slice(1));
+        const user = data.user;
+        if (!user) return;
+        setCanEdit(true);
+        const meta = user.user_metadata as { display_name?: string } | undefined;
+        const customName = meta?.display_name?.trim();
+        setCustom(customName ? customName : null);
+        const email = user.email;
+        if (email) {
+          const local = email.split("@")[0].replace(/[._-]+/g, " ").trim();
+          if (local) setFallback(local.charAt(0).toUpperCase() + local.slice(1));
+        }
       })
       .catch(() => {
         // Stale/absent session — keep the neutral default.
       });
   }, []);
 
-  return name;
+  const saveName = useCallback((next: string) => {
+    const trimmed = next.trim();
+    setCustom(trimmed ? trimmed : null);
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    // Persist to auth metadata so the name syncs across devices. Fire-and-forget;
+    // local state already reflects the change for an instant UI update.
+    void supabase.auth.updateUser({ data: { display_name: trimmed } });
+  }, []);
+
+  const name = custom ?? fallback;
+  return { name, editableValue: custom ?? fallback, canEdit, saveName };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -732,7 +767,18 @@ export default function HomePage() {
   const sessionsCompleted = useProdStore((state) => state.sessionsCompleted);
   const history = useProdStore((state) => state.history);
 
-  const name = useGreetingName();
+  const { name, editableValue, canEdit, saveName } = useGreetingName();
+  // Inline editing of the greeting name.
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const startEditName = () => {
+    setNameDraft(editableValue === "there" ? "" : editableValue);
+    setEditingName(true);
+  };
+  const commitName = () => {
+    saveName(nameDraft);
+    setEditingName(false);
+  };
 
   // "Completed Today" accordion — defaults collapsed so finished work stays
   // tucked away until the user wants to review it.
@@ -850,7 +896,36 @@ export default function HomePage() {
               <span>{dateLabel || " "}</span>
             </div>
             <h1 className="font-heading mt-2.5 text-3xl leading-tight font-semibold tracking-tight text-[var(--c-ink-2)] md:text-[38px]">
-              {greeting.hello}, {name}.
+              {greeting.hello},{" "}
+              {editingName ? (
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={commitName}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                    if (e.key === "Escape") setEditingName(false);
+                  }}
+                  placeholder="your name"
+                  maxLength={40}
+                  style={{ width: `${Math.max(nameDraft.length, 6) + 1}ch` }}
+                  className="max-w-full rounded-md border border-[#a35d4d]/40 bg-[var(--c-panel)] px-1.5 align-baseline outline-none focus:ring-2 focus:ring-[#a35d4d]/20"
+                />
+              ) : canEdit ? (
+                <button
+                  type="button"
+                  onClick={startEditName}
+                  title="Edit your name"
+                  className="group/name inline-flex items-center gap-1.5 rounded-md border border-transparent px-1 align-baseline transition-colors hover:border-[var(--c-line)] hover:bg-[var(--c-panel-soft)]"
+                >
+                  {name}
+                  <Pencil className="size-4 shrink-0 text-[var(--c-faint)] opacity-50 transition-opacity group-hover/name:opacity-100" />
+                </button>
+              ) : (
+                name
+              )}
+              .
             </h1>
             <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[var(--c-ink-3)]">
               {greeting.intention}

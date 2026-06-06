@@ -140,9 +140,11 @@ function InboxRow({ task }: { task: Task }) {
         type="button"
         onClick={() => updateTask(task.id, { status: "Not Started" })}
         title="Move to board"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[var(--c-beige)] px-3 py-1.5 text-[12.5px] font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+        aria-label="Move to board"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[var(--c-beige)] px-2.5 py-1.5 text-[12.5px] font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d] sm:px-3"
       >
-        Move to board <ArrowRight className="size-3.5" />
+        <span className="hidden sm:inline">Move to board</span>
+        <ArrowRight className="size-3.5" />
       </button>
       <button
         type="button"
