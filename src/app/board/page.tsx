@@ -29,6 +29,7 @@ import {
   ArrowUp,
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
   CornerDownRight,
   FolderPlus,
@@ -1467,6 +1468,7 @@ export default function BoardPage() {
   };
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [showCompleted, setShowCompleted] = useState(false);
   const [sortDirection, setSortDirection] = useState<SortDirection>("none");
   const [categorySort, setCategorySort] = useState<CategorySort>("none");
 
@@ -1500,8 +1502,12 @@ export default function BoardPage() {
 
   const visibleTasks = useMemo(() => {
     // Inbox tasks are a separate holding pen (see /inbox) and never appear on
-    // the board until the user promotes them to another status.
-    const boardTasks = tasks.filter((task) => task.status !== "Inbox");
+    // the board until the user promotes them to another status. Done tasks also
+    // leave the active groups — they collect in the collapsible "Completed"
+    // section at the bottom of the board.
+    const boardTasks = tasks.filter(
+      (task) => task.status !== "Inbox" && task.status !== "Done"
+    );
     const filtered =
       statusFilter === "all"
         ? boardTasks
@@ -1557,6 +1563,16 @@ export default function BoardPage() {
 
     return names.map((name) => [name, map.get(name) ?? []]);
   }, [visibleTasks, categories, categorySort]);
+
+  // Done tasks, pulled out of the active groups and gathered into the
+  // collapsible "Completed" section at the bottom (mirrors the Dashboard).
+  const completedTasks = useMemo(
+    () =>
+      tasks
+        .filter((task) => task.status === "Done")
+        .sort((a, b) => a.order - b.order),
+    [tasks]
+  );
 
   const draggingTask = draggingId
     ? tasks.find((task) => task.id === draggingId) ?? null
@@ -1851,7 +1867,7 @@ export default function BoardPage() {
           })}
         </div>
 
-        {visibleTasks.length === 0 && tasks.length > 0 ? (
+        {statusFilter !== "all" && visibleTasks.length === 0 && tasks.length > 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-14 text-center text-sm text-[var(--c-dim)]">
             No tasks match this filter.
           </div>
@@ -2088,6 +2104,50 @@ export default function BoardPage() {
                 </button>
               )}
             </div>
+
+            {/* Completed — collapsible, defaults closed. Done tasks leave their
+                category groups and gather here for later review. */}
+            {completedTasks.length > 0 && (
+              <section className="mt-12">
+                <button
+                  type="button"
+                  onClick={() => setShowCompleted((v) => !v)}
+                  aria-expanded={showCompleted}
+                  className="flex w-full items-center justify-between rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] px-5 py-3.5 text-left shadow-[0_1px_3px_rgba(74,64,54,0.05)] transition-colors hover:bg-[var(--c-beige-2)]"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-md bg-[#6f9e6a] text-white">
+                      <Check className="size-3.5" strokeWidth={3} />
+                    </span>
+                    <h2 className="font-heading text-base font-semibold text-[var(--c-ink-2)] md:text-lg">
+                      Completed
+                    </h2>
+                    <span className="rounded-full bg-[var(--c-beige)] px-2.5 py-1 text-[12.5px] font-medium text-[var(--c-dim)]">
+                      {completedTasks.length}
+                    </span>
+                  </div>
+                  <ChevronDown
+                    className={cn(
+                      "size-5 text-[var(--c-dim)] transition-transform",
+                      showCompleted && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {showCompleted && (
+                  <div className="mt-3 flex flex-col gap-3">
+                    {completedTasks.map((task) => (
+                      <SortableTaskCard
+                        key={task.id}
+                        task={task}
+                        isActive={task.id === activeTaskId}
+                        dragEnabled={false}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
 
             {/* Floating overlay: shows a task card or a category header ghost. */}
             <DragOverlay dropAnimation={{ duration: 220, easing: "ease" }}>
