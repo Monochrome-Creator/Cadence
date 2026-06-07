@@ -42,6 +42,7 @@ import {
   DAILY_GOAL_POINTS,
   TASK_POINTS,
   useProdStore,
+  type Goal,
   type HistoryStats,
   type LifePillar,
   type Recurrence,
@@ -737,6 +738,147 @@ function LifePillarsWidget({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                       North Star — goals overview widget                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Dashboard widget showing up to 3 active goals with live task-progress bars.
+ * Serves as a constant reminder of the big picture while working through the
+ * daily task list. Renders nothing when no goals exist yet.
+ */
+function NorthStarWidget({
+  goals,
+  tasks,
+}: {
+  goals: Goal[];
+  tasks: Task[];
+}) {
+  const active = goals.filter((g) => g.status === "active").slice(0, 3);
+  if (active.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-4 rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel)] p-[22px] shadow-[0_1px_3px_rgba(74,64,54,0.05)]">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Target className="size-[18px] text-[#a35d4d]" />
+          <p className="font-heading text-base font-semibold text-[var(--c-ink-2)]">
+            North Star
+          </p>
+        </div>
+        <Link
+          href="/goals"
+          className="text-[12px] font-medium text-[#a35d4d] hover:underline"
+        >
+          Manage goals →
+        </Link>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {active.map((goal) => {
+          const linked = tasks.filter((t) => t.goalId === goal.id);
+          const done = linked.filter((t) => t.status === "Done").length;
+          const total = linked.length;
+          const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+          const pillar = goal.lifePillar ? PILLAR_THEME[goal.lifePillar] : null;
+
+          return (
+            <div key={goal.id} className="flex flex-col gap-2">
+              <div className="flex items-start gap-2.5">
+                <span
+                  className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg"
+                  style={
+                    pillar
+                      ? { backgroundColor: `${pillar.fill}22` }
+                      : { backgroundColor: "var(--c-beige)" }
+                  }
+                >
+                  <Target
+                    className="size-3.5"
+                    style={pillar ? { color: pillar.fill } : { color: "#a35d4d" }}
+                  />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[14px] font-semibold text-[var(--c-ink-2)]">
+                    {goal.title}
+                  </p>
+                  {goal.description && (
+                    <p className="mt-0.5 truncate text-[12px] text-[var(--c-dim)]">
+                      {goal.description}
+                    </p>
+                  )}
+                </div>
+                <div className="shrink-0 text-right">
+                  {total > 0 ? (
+                    <span className="font-mono text-[12px] font-semibold tabular-nums text-[var(--c-dim)]">
+                      {pct}%
+                    </span>
+                  ) : (
+                    <span className="text-[11px] text-[var(--c-faint)]">
+                      No tasks
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--c-beige)]">
+                <div
+                  className="h-full rounded-full transition-[width] duration-500 ease-out"
+                  style={{
+                    width: `${pct}%`,
+                    backgroundColor: pillar ? pillar.fill : "#a35d4d",
+                  }}
+                />
+              </div>
+
+              {/* Meta pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {pillar && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                      PILLAR_THEME[goal.lifePillar!].badge
+                    )}
+                  >
+                    <Sparkles className="size-2.5" />
+                    {pillar.label}
+                  </span>
+                )}
+                {total > 0 && (
+                  <span className="text-[11.5px] text-[var(--c-dim)]">
+                    {done}/{total} tasks done
+                  </span>
+                )}
+                {goal.targetDate && (
+                  <span className="inline-flex items-center gap-1 text-[11.5px] text-[var(--c-dim)]">
+                    <CalendarDays className="size-3 text-[var(--c-faint)]" />
+                    {format(parseISO(goal.targetDate), "dd MMM yyyy")}
+                  </span>
+                )}
+              </div>
+
+              {/* Separator (not on last item) */}
+              {active.indexOf(goal) < active.length - 1 && (
+                <div className="border-t border-dashed border-[var(--c-line)] pt-0.5" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {goals.filter((g) => g.status === "active").length > 3 && (
+        <Link
+          href="/goals"
+          className="text-center text-[12.5px] font-medium text-[#a35d4d] hover:underline"
+        >
+          +{goals.filter((g) => g.status === "active").length - 3} more goals →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                 Home page                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -853,6 +995,7 @@ function DeadlineAlerts({
 
 export default function HomePage() {
   const tasks = useProdStore((state) => state.tasks);
+  const goals = useProdStore((state) => state.goals);
   const activeTaskId = useProdStore((state) => state.activeTaskId);
   const setActiveTask = useProdStore((state) => state.setActiveTask);
   const escalatePriority = useProdStore((state) => state.escalatePriority);
@@ -1079,6 +1222,9 @@ export default function HomePage() {
 
         {/* Balance — the Four Pillars of the life-OS */}
         <LifePillarsWidget totals={pillarTotals} />
+
+        {/* North Star — big goals with live progress */}
+        <NorthStarWidget goals={goals} tasks={tasks} />
 
         {/* Focus board + Action Center sidebar */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

@@ -11,6 +11,7 @@ import {
   LogIn,
   LogOut,
   Repeat,
+  Target,
   Timer,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ const NAV_LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/board", label: "Board", icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/goals", label: "North Star", icon: Target },
   { href: "/recurring", label: "Scheduled", icon: Repeat },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
 ];
@@ -37,6 +39,7 @@ const MOBILE_NAV_LINKS = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/board", label: "Board", icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", icon: Inbox },
+  { href: "/goals", label: "Goals", icon: Target },
   { href: "/timer", label: "Timer", icon: Timer },
   { href: "/flashcards", label: "Flashcards", icon: Layers },
 ];

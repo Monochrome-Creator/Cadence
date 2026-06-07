@@ -57,6 +57,7 @@ import {
   computeSubtaskRollups,
   effectiveTaskProgress,
   useProdStore,
+  type Goal,
   type LifePillar,
   type Recurrence,
   type Subtask,
@@ -926,6 +927,67 @@ function PillarSelect({
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*                          North Star goal selector                           */
+/* -------------------------------------------------------------------------- */
+/**
+ * Compact pill that shows the linked goal title (truncated) or a muted
+ * "+ Goal" affordance. Uses the same icon-only trigger pattern as PillarSelect.
+ * "none" sentinel maps to an unset (undefined) goalId.
+ */
+function GoalSelect({
+  value,
+  goals,
+  onChange,
+}: {
+  value: string | undefined;
+  goals: Goal[];
+  onChange: (next: string | undefined) => void;
+}) {
+  const active = goals.filter((g) => g.status === "active");
+  const linked = goals.find((g) => g.id === value);
+  return (
+    <Select
+      value={value ?? "none"}
+      onValueChange={(next) =>
+        onChange(!next || next === "none" ? undefined : next)
+      }
+    >
+      <SelectTrigger
+        aria-label="Link to a goal"
+        title={linked ? `Goal: ${linked.title}` : "Link to a North Star goal"}
+        className={cn(
+          "h-auto w-auto max-w-[140px] justify-center gap-1 rounded-full border-0 px-2 py-0.5 text-[11px] font-medium shadow-none [&>svg:last-child]:hidden",
+          linked
+            ? "bg-[#f6e6da] text-[#a35d4d]"
+            : "bg-[var(--c-panel-soft)] text-[var(--c-dim)] hover:text-[#a35d4d]"
+        )}
+      >
+        <span className="inline-flex items-center gap-1 truncate">
+          <Target className="size-3 shrink-0" />
+          <span className="truncate">
+            {linked ? linked.title : "Goal"}
+          </span>
+        </span>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">No goal</SelectItem>
+        {active.length === 0 ? (
+          <SelectItem value="__empty__" disabled>
+            No active goals yet
+          </SelectItem>
+        ) : (
+          active.map((g) => (
+            <SelectItem key={g.id} value={g.id}>
+              {g.title}
+            </SelectItem>
+          ))
+        )}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function SortableTaskCard({
   task,
   isActive,
@@ -943,6 +1005,7 @@ function SortableTaskCard({
   const completeAndRepeatTask = useProdStore(
     (state) => state.completeAndRepeatTask
   );
+  const goals = useProdStore((state) => state.goals);
 
   // A task with no micro-tasks owns an editable manual percentage; once it has
   // children, progress becomes the read-only roll-up of their completion.
@@ -1140,6 +1203,11 @@ function SortableTaskCard({
               <PillarSelect
                 value={task.lifePillar}
                 onChange={(next) => updateTask(task.id, { lifePillar: next })}
+              />
+              <GoalSelect
+                value={task.goalId}
+                goals={goals}
+                onChange={(next) => updateTask(task.id, { goalId: next })}
               />
               {task.subcategory.trim() && (
                 <span

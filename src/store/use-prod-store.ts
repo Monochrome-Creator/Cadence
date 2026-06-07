@@ -112,6 +112,12 @@ export interface Task {
    * psychologically apart. Undefined/false means a normal daytime task.
    */
   isEvening?: boolean;
+  /**
+   * The North Star goal this task is contributing toward. Links the day-to-day
+   * work on the board to a bigger-picture objective so context is never lost.
+   * Undefined for tasks not tied to any goal.
+   */
+  goalId?: string;
   subtasks: Subtask[];
 }
 
@@ -251,6 +257,26 @@ export function computeL3Fraction(subtasks: Subtask[]): {
   const l3 = subtasks.filter((s) => s.level === "L3");
   const done = l3.filter((s) => leafPercent(s) >= 100).length;
   return { done, total: l3.length };
+}
+
+/**
+ * A "North Star" goal — a high-level life objective that tasks can be linked
+ * to, giving individual work items a bigger-picture context. Goals can
+ * optionally belong to a life pillar (pulling in that pillar's color treatment)
+ * or be fully independent. The `status` field drives the /goals page split
+ * between active and achieved goals.
+ */
+export interface Goal {
+  id: string;
+  title: string;
+  /** One-line motivational description or "why this matters". */
+  description: string;
+  /** Target achievement date as yyyy-MM-dd ("" when open-ended). */
+  targetDate: string;
+  /** Optional pillar association for visual grouping and color. */
+  lifePillar?: LifePillar;
+  status: "active" | "done";
+  order: number;
 }
 
 export interface Flashcard {
@@ -455,6 +481,8 @@ interface ProdState {
   tasks: Task[];
   /** Managed, ordered list of board categories (columns). Persists empty ones. */
   categories: string[];
+  /** North Star goals — the big objectives tasks are working toward. */
+  goals: Goal[];
   flashcards: Flashcard[];
   activeTaskId: string | null;
   /** Daily productivity log keyed by local `yyyy-MM-dd` — powers the streak. */
@@ -575,6 +603,16 @@ interface ProdState {
    * 100%; unchecking reopens the whole branch.
    */
   toggleSubtaskComplete: (taskId: string, subtaskId: string) => void;
+  /** Create a new North Star goal. */
+  addGoal: (goal: Omit<Goal, "id" | "order">) => void;
+  /** Update any fields on an existing goal. */
+  updateGoal: (id: string, updates: Partial<Omit<Goal, "id">>) => void;
+  /**
+   * Delete a goal and clear its reference from any tasks that were linked to
+   * it, so no task is left with a dangling goalId.
+   */
+  deleteGoal: (id: string) => void;
+
   setFlashcards: (flashcards: Flashcard[]) => void;
   setActiveTask: (id: string | null) => void;
 
@@ -786,6 +824,7 @@ export const useProdStore = create<ProdState>()(
     (set, get) => ({
   tasks: initialTasks,
   categories: initialCategories,
+  goals: [],
   flashcards: [],
   activeTaskId: null,
   history: {},
@@ -1211,6 +1250,33 @@ export const useProdStore = create<ProdState>()(
     }));
     queueTaskPush(get, [taskId]);
   },
+  addGoal: (goal) => {
+    set((state) => {
+      const maxOrder = state.goals.reduce((max, g) => Math.max(max, g.order), -1);
+      return {
+        goals: [
+          ...state.goals,
+          { ...goal, id: `goal-${crypto.randomUUID()}`, order: maxOrder + 1 },
+        ],
+      };
+    });
+  },
+  updateGoal: (id, updates) => {
+    set((state) => ({
+      goals: state.goals.map((g) => (g.id === id ? { ...g, ...updates } : g)),
+    }));
+  },
+  deleteGoal: (id) => {
+    set((state) => ({
+      goals: state.goals.filter((g) => g.id !== id),
+      // Un-link any tasks that were pointing at the deleted goal so no task
+      // ends up referencing a ghost goalId.
+      tasks: state.tasks.map((t) =>
+        t.goalId === id ? { ...t, goalId: undefined } : t
+      ),
+    }));
+  },
+
   setFlashcards: (flashcards) => set({ flashcards }),
   setActiveTask: (id) => set({ activeTaskId: id }),
 
@@ -1410,6 +1476,7 @@ export const useProdStore = create<ProdState>()(
       partialize: (state) => ({
         tasks: state.tasks,
         categories: state.categories,
+        goals: state.goals,
         flashcards: state.flashcards,
         activeTaskId: state.activeTaskId,
         history: state.history,
