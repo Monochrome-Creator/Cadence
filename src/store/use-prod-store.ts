@@ -34,6 +34,21 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export type TaskPriority = "Low" | "Medium" | "High" | "Critical";
 
+/**
+ * The "Four Pillars" of the life-OS: the high-level life areas a task can be
+ * attributed to. A task with no pillar is a general/untagged item. `Personal_IP`
+ * is stored with an underscore (DB-safe enum value); the UI renders it as
+ * "Personal IP" — see src/lib/life-pillars.ts.
+ */
+export const LIFE_PILLARS = [
+  "Wealth",
+  "Health",
+  "Career",
+  "Personal_IP",
+] as const;
+
+export type LifePillar = (typeof LIFE_PILLARS)[number];
+
 /** How often a task repeats. 'none' is a one-off task. */
 export type Recurrence =
   | "none"
@@ -73,6 +88,12 @@ export interface Task {
   category: string;
   /** Optional second-level grouping within a category ("" when unset). */
   subcategory: string;
+  /**
+   * Which "Four Pillars" life area this task serves (Wealth/Health/Career/
+   * Personal_IP). Undefined for general, unattributed tasks. Powers the
+   * dashboard's Balance widget and the colored pillar badges on cards.
+   */
+  lifePillar?: LifePillar;
   /** Repeat interval driving completeAndRepeatTask. */
   recurrence: Recurrence;
   pomodorosLogged: number;
@@ -249,6 +270,13 @@ export interface DayActivity {
    * streak. Optional so days logged before this field default to 0.
    */
   points?: number;
+  /**
+   * Per-pillar completion counts for that day — how many tasks tagged to each
+   * life pillar were finished. Drives the dashboard Balance widget's trailing
+   * 7-day view. Optional/sparse: only pillars with completions appear, and days
+   * logged before this field default to none.
+   */
+  pillars?: Partial<Record<LifePillar, number>>;
 }
 
 /** Derived consistency metrics shown on the home dashboard. */
@@ -300,7 +328,7 @@ function isDayActive(history: Record<string, DayActivity>, key: string): boolean
 /** Return a new history with today's `field` incremented by one. */
 function bumpHistory(
   history: Record<string, DayActivity>,
-  field: keyof DayActivity
+  field: "sessions" | "tasksDone" | "points"
 ): Record<string, DayActivity> {
   const key = format(new Date(), "yyyy-MM-dd");
   const prev = history[key] ?? { sessions: 0, tasksDone: 0, points: 0 };
@@ -309,11 +337,14 @@ function bumpHistory(
 
 /**
  * Record a completed task in today's log: bumps the task count by one and adds
- * its weighted effort points. Both feed the Daily Goal and streak.
+ * its weighted effort points. Both feed the Daily Goal and streak. When the
+ * task is attributed to a life pillar, that pillar's daily count is also
+ * incremented so the Balance widget can show a trailing-7-day breakdown.
  */
 function logTaskCompletion(
   history: Record<string, DayActivity>,
-  points: number
+  points: number,
+  pillar?: LifePillar
 ): Record<string, DayActivity> {
   const key = format(new Date(), "yyyy-MM-dd");
   const prev = history[key] ?? { sessions: 0, tasksDone: 0, points: 0 };
@@ -323,6 +354,9 @@ function logTaskCompletion(
       ...prev,
       tasksDone: prev.tasksDone + 1,
       points: (prev.points ?? 0) + points,
+      pillars: pillar
+        ? { ...prev.pillars, [pillar]: (prev.pillars?.[pillar] ?? 0) + 1 }
+        : prev.pillars,
     },
   };
 }
@@ -810,7 +844,11 @@ export const useProdStore = create<ProdState>()(
           task.id === id ? { ...task, ...updates } : task
         ),
         history: becameDone
-          ? logTaskCompletion(state.history, points)
+          ? logTaskCompletion(
+              state.history,
+              points,
+              updates.lifePillar ?? existing?.lifePillar
+            )
           : state.history,
       };
     });
@@ -967,7 +1005,7 @@ export const useProdStore = create<ProdState>()(
           t.id === taskId ? { ...t, status: "Done" as TaskStatus } : t
         ),
         history: becameDone
-          ? logTaskCompletion(state.history, points)
+          ? logTaskCompletion(state.history, points, target.lifePillar)
           : state.history,
       }));
       queueTaskPush(get, [taskId]);
@@ -1001,7 +1039,7 @@ export const useProdStore = create<ProdState>()(
           repeated,
         ],
         history: becameDone
-          ? logTaskCompletion(state.history, points)
+          ? logTaskCompletion(state.history, points, target.lifePillar)
           : state.history,
       };
     });
@@ -1063,6 +1101,7 @@ export const useProdStore = create<ProdState>()(
   updateSubtask: (taskId, subtaskId, updates) => {
     let becameDone = false;
     let completedPoints = 0;
+    let completedPillar: LifePillar | undefined;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
@@ -1077,11 +1116,12 @@ export const useProdStore = create<ProdState>()(
         if (synced.status === "Done" && task.status !== "Done") {
           becameDone = true;
           completedPoints = taskPoints(task.priority);
+          completedPillar = task.lifePillar;
         }
         return synced;
       }),
       history: becameDone
-        ? logTaskCompletion(state.history, completedPoints)
+        ? logTaskCompletion(state.history, completedPoints, completedPillar)
         : state.history,
     }));
     queueTaskPush(get, [taskId]);
@@ -1132,6 +1172,7 @@ export const useProdStore = create<ProdState>()(
   toggleSubtaskComplete: (taskId, subtaskId) => {
     let becameDone = false;
     let completedPoints = 0;
+    let completedPillar: LifePillar | undefined;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
@@ -1160,11 +1201,12 @@ export const useProdStore = create<ProdState>()(
         if (synced.status === "Done" && task.status !== "Done") {
           becameDone = true;
           completedPoints = taskPoints(task.priority);
+          completedPillar = task.lifePillar;
         }
         return synced;
       }),
       history: becameDone
-        ? logTaskCompletion(state.history, completedPoints)
+        ? logTaskCompletion(state.history, completedPoints, completedPillar)
         : state.history,
     }));
     queueTaskPush(get, [taskId]);

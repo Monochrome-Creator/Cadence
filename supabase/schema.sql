@@ -73,6 +73,9 @@ create table if not exists public.tasks (
   -- "This Evening" flag: surfaces the task under a separate after-hours header
   -- on the dashboard. Defaults false (a normal daytime task).
   is_evening       boolean not null default false,
+  -- "Four Pillars" life-area attribution. Null for general/untagged tasks.
+  life_pillar      text
+                     check (life_pillar is null or life_pillar in ('Wealth', 'Health', 'Career', 'Personal_IP')),
   updated_at       timestamptz not null default now()
 );
 
@@ -102,6 +105,15 @@ alter table public.tasks
 alter table public.tasks
   add column if not exists progress integer
     check (progress is null or (progress >= 0 and progress <= 100));
+
+-- Existing installs: add the "Four Pillars" life-area attribution column.
+alter table public.tasks
+  add column if not exists life_pillar text;
+alter table public.tasks
+  drop constraint if exists tasks_life_pillar_check;
+alter table public.tasks
+  add constraint tasks_life_pillar_check
+    check (life_pillar is null or life_pillar in ('Wealth', 'Health', 'Career', 'Personal_IP'));
 
 create index if not exists tasks_user_order_idx
   on public.tasks (user_id, task_order);

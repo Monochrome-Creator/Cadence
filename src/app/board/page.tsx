@@ -41,6 +41,7 @@ import {
   Plus,
   RefreshCw,
   Repeat,
+  Sparkles,
   Tags,
   Target,
   Timer,
@@ -49,12 +50,14 @@ import {
 } from "lucide-react";
 
 import {
+  LIFE_PILLARS,
   TASK_STATUSES,
   clampPercent,
   computeL3Fraction,
   computeSubtaskRollups,
   effectiveTaskProgress,
   useProdStore,
+  type LifePillar,
   type Recurrence,
   type Subtask,
   type SubtaskLevel,
@@ -63,6 +66,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "@/store/use-prod-store";
+import { PILLAR_THEME } from "@/lib/life-pillars";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -864,6 +868,64 @@ function MicroTaskPanel({ task }: { task: Task }) {
 /*                              Sortable task card                            */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*                          Life Pillar selector pill                          */
+/* -------------------------------------------------------------------------- */
+/**
+ * Compact, colored pill that both displays a task's life pillar and lets the
+ * user reassign it inline. Renders a muted "+ Pillar" affordance when unset.
+ * Used on the board card meta row and the new-task composer. The `"none"`
+ * sentinel maps to/from an unset (undefined) pillar.
+ */
+function PillarSelect({
+  value,
+  onChange,
+}: {
+  value: LifePillar | undefined;
+  onChange: (next: LifePillar | undefined) => void;
+}) {
+  return (
+    <Select
+      value={value ?? "none"}
+      onValueChange={(next) =>
+        onChange(next === "none" ? undefined : (next as LifePillar))
+      }
+    >
+      <SelectTrigger
+        aria-label="Set life pillar"
+        title={value ? `Pillar: ${PILLAR_THEME[value].label}` : "Assign a life pillar"}
+        className={cn(
+          "h-auto w-auto justify-center gap-1 rounded-full border-0 px-2 py-0.5 text-[11px] font-medium shadow-none [&>svg:last-child]:hidden",
+          value
+            ? PILLAR_THEME[value].badge
+            : "bg-[var(--c-panel-soft)] text-[var(--c-dim)] hover:text-[#a35d4d]"
+        )}
+      >
+        {value ? (
+          <span className="inline-flex items-center gap-1">
+            <Sparkles className="size-3" />
+            {PILLAR_THEME[value].label}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            <Plus className="size-3" />
+            Pillar
+          </span>
+        )}
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">No pillar</SelectItem>
+        {LIFE_PILLARS.map((pillar) => (
+          <SelectItem key={pillar} value={pillar}>
+            <span className={cn("size-2 rounded-full", PILLAR_THEME[pillar].dot)} />
+            {PILLAR_THEME[pillar].label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function SortableTaskCard({
   task,
   isActive,
@@ -1075,6 +1137,10 @@ function SortableTaskCard({
             </div>
 
             <div className="ml-2 flex flex-wrap items-center gap-1.5">
+              <PillarSelect
+                value={task.lifePillar}
+                onChange={(next) => updateTask(task.id, { lifePillar: next })}
+              />
               {task.subcategory.trim() && (
                 <span
                   title={`Sub-category: ${task.subcategory}`}
@@ -1292,6 +1358,17 @@ function TaskDragOverlayCard({ task }: { task: Task }) {
           {task.category}
         </span>
       )}
+      {task.lifePillar && (
+        <span
+          className={cn(
+            "hidden shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium sm:inline-flex",
+            PILLAR_THEME[task.lifePillar].badge
+          )}
+        >
+          <Sparkles className="size-3" />
+          {PILLAR_THEME[task.lifePillar].label}
+        </span>
+      )}
       <span
         className={cn(
           "shrink-0 rounded-full px-3 py-1 text-xs font-medium",
@@ -1477,6 +1554,8 @@ export default function BoardPage() {
   // Which category section currently has its inline "add task" row open.
   const [addingCategory, setAddingCategory] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
+  // Optional life pillar to stamp on the task being composed.
+  const [newPillar, setNewPillar] = useState<LifePillar | undefined>(undefined);
 
   // Inline category header rename + the bottom "new category" composer.
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
@@ -1680,6 +1759,7 @@ export default function BoardPage() {
       deadline: "",
       pomodorosLogged: 0,
       category,
+      ...(newPillar ? { lifePillar: newPillar } : {}),
     });
     setNewTitle("");
   };
@@ -1687,11 +1767,13 @@ export default function BoardPage() {
   const startAdding = (category: string) => {
     setAddingCategory(category);
     setNewTitle("");
+    setNewPillar(undefined);
   };
 
   const cancelAdding = () => {
     setAddingCategory(null);
     setNewTitle("");
+    setNewPillar(undefined);
   };
 
   /* ----------------------------- category CRUD ---------------------------- */
@@ -2015,34 +2097,40 @@ export default function BoardPage() {
                     {/* Add Task — scoped to this category */}
                     <div className="mt-4">
                       {addingCategory === category ? (
-                      <div className="flex items-center gap-3 rounded-xl border border-[#a35d4d]/30 bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
-                        <Plus className="size-5 shrink-0 text-[#a35d4d]" />
-                        <Input
-                          autoFocus
-                          value={newTitle}
-                          onChange={(e) => setNewTitle(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") commitNewTask(category);
-                            if (e.key === "Escape") cancelAdding();
-                          }}
-                          placeholder={`Add to ${category} — press Enter`}
-                          className="border-transparent bg-transparent text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
-                        />
-                        <Button
-                          onClick={() => commitNewTask(category)}
-                          disabled={newTitle.trim().length === 0}
-                          className="bg-[#a35d4d] text-white hover:bg-[#8f4f41] disabled:opacity-40"
-                        >
-                          Add
-                        </Button>
-                        <button
-                          type="button"
-                          title="Cancel"
-                          onClick={cancelAdding}
-                          className="flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-2)]"
-                        >
-                          <X className="size-4" />
-                        </button>
+                      <div className="flex flex-col gap-2.5 rounded-xl border border-[#a35d4d]/30 bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
+                        <div className="flex items-center gap-3">
+                          <Plus className="size-5 shrink-0 text-[#a35d4d]" />
+                          <Input
+                            autoFocus
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") commitNewTask(category);
+                              if (e.key === "Escape") cancelAdding();
+                            }}
+                            placeholder={`Add to ${category} — press Enter`}
+                            className="border-transparent bg-transparent text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
+                          />
+                          <Button
+                            onClick={() => commitNewTask(category)}
+                            disabled={newTitle.trim().length === 0}
+                            className="bg-[#a35d4d] text-white hover:bg-[#8f4f41] disabled:opacity-40"
+                          >
+                            Add
+                          </Button>
+                          <button
+                            type="button"
+                            title="Cancel"
+                            onClick={cancelAdding}
+                            className="flex size-9 shrink-0 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-2)]"
+                          >
+                            <X className="size-4" />
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2 pl-8 text-[12px] text-[var(--c-dim)]">
+                          <span>Life pillar:</span>
+                          <PillarSelect value={newPillar} onChange={setNewPillar} />
+                        </div>
                       </div>
                     ) : (
                       <button

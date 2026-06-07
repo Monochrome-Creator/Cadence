@@ -13,6 +13,7 @@ import {
   format,
   isValid,
   parseISO,
+  subDays,
 } from "date-fns";
 import {
   ArrowRight,
@@ -27,6 +28,8 @@ import {
   Play,
   Plus,
   Repeat,
+  Scale,
+  Sparkles,
   Sun,
   Target,
   Timer,
@@ -40,12 +43,14 @@ import {
   TASK_POINTS,
   useProdStore,
   type HistoryStats,
+  type LifePillar,
   type Recurrence,
   type Task,
   type TaskPriority,
   type TaskStatus,
 } from "@/store/use-prod-store";
 import { getSupabaseClient, isSupabaseConfigured } from "@/utils/supabase/client";
+import { PILLAR_ORDER, PILLAR_THEME } from "@/lib/life-pillars";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
 
@@ -462,6 +467,17 @@ function FocusRow({
             >
               {category}
             </span>
+            {task.lifePillar && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                  PILLAR_THEME[task.lifePillar].badge
+                )}
+              >
+                <Sparkles className="size-3" />
+                {PILLAR_THEME[task.lifePillar].label}
+              </span>
+            )}
             {deadline && (
               <span className="inline-flex items-center gap-1.5">
                 <CalendarDays className="size-3.5 text-[var(--c-faint)]" />
@@ -645,6 +661,82 @@ function FocusStatsCard({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                       Balance — the Four Pillars widget                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * "Balance" widget: four minimal progress bars — one per life pillar — showing
+ * how the user's completed work over the last 7 days is distributed across
+ * Wealth, Health, Career, and Personal IP. Each bar is normalised to the
+ * busiest pillar so the longest bar marks where energy is going and the empty
+ * ones flag neglected areas. Counts come from the daily history log.
+ */
+function LifePillarsWidget({
+  totals,
+}: {
+  totals: Record<LifePillar, number>;
+}) {
+  const max = Math.max(1, ...PILLAR_ORDER.map((p) => totals[p]));
+  const sum = PILLAR_ORDER.reduce((acc, p) => acc + totals[p], 0);
+  // Surface the most-neglected pillar as a gentle nudge (only once there's
+  // enough activity for the comparison to be meaningful).
+  const neglected = sum >= 3
+    ? [...PILLAR_ORDER].sort((a, b) => totals[a] - totals[b])[0]
+    : null;
+
+  return (
+    <div className="flex flex-col gap-[18px] rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel)] p-[22px] shadow-[0_1px_3px_rgba(74,64,54,0.05)]">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Scale className="size-[18px] text-[#a35d4d]" />
+          <p className="font-heading text-base font-semibold text-[var(--c-ink-2)]">
+            Balance
+          </p>
+        </div>
+        <span className="text-[11px] font-medium tracking-[0.03em] text-[var(--c-dim)] uppercase">
+          Last 7 days
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {PILLAR_ORDER.map((pillar) => {
+          const theme = PILLAR_THEME[pillar];
+          const count = totals[pillar];
+          const width = sum === 0 ? 0 : Math.round((count / max) * 100);
+          return (
+            <div key={pillar} className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[12.5px]">
+                <span className="flex items-center gap-1.5 font-medium text-[var(--c-ink-3)]">
+                  <span className={cn("size-2 rounded-full", theme.dot)} />
+                  {theme.label}
+                </span>
+                <span className="font-mono text-[12px] font-semibold tabular-nums text-[var(--c-dim)]">
+                  {count}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--c-beige)]">
+                <div
+                  className="h-full rounded-full transition-[width] duration-500 ease-out"
+                  style={{ width: `${width}%`, backgroundColor: theme.fill }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-[12px] leading-relaxed text-[var(--c-dim)]">
+        {sum === 0
+          ? "Tag tasks with a life pillar to see where your week's energy is going."
+          : neglected
+            ? `${PILLAR_THEME[neglected].label} is getting the least attention this week.`
+            : "A balanced week so far — nicely paced across the board."}
+      </p>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                 Home page                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -800,6 +892,27 @@ export default function HomePage() {
   const greeting = greetingFor(now?.getHours() ?? 8);
   const GreetingIcon = greeting.icon;
   const dateLabel = now ? format(now, "EEEE, MMMM d") : "";
+
+  // Balance widget: completed tasks per life pillar over the trailing 7 days,
+  // summed from the daily history log. Gated on `now` so the date-relative
+  // window only runs on the client and never mismatches the server render.
+  const pillarTotals = useMemo(() => {
+    const totals: Record<LifePillar, number> = {
+      Wealth: 0,
+      Health: 0,
+      Career: 0,
+      Personal_IP: 0,
+    };
+    if (!now) return totals;
+    for (let i = 0; i < 7; i++) {
+      const dayPillars = history[format(subDays(now, i), "yyyy-MM-dd")]?.pillars;
+      if (!dayPillars) continue;
+      for (const pillar of PILLAR_ORDER) {
+        totals[pillar] += dayPillars[pillar] ?? 0;
+      }
+    }
+    return totals;
+  }, [now, history]);
 
   // Rank tasks by importance so the dashboard can surface what matters now
   // rather than the whole board: the pinned focus task leads, then incomplete
@@ -963,6 +1076,9 @@ export default function HomePage() {
             week={stats.week}
           />
         </section>
+
+        {/* Balance — the Four Pillars of the life-OS */}
+        <LifePillarsWidget totals={pillarTotals} />
 
         {/* Focus board + Action Center sidebar */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

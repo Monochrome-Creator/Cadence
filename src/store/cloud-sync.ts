@@ -15,6 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseClient, isSupabaseConfigured } from "@/utils/supabase/client";
 import type {
+  LifePillar,
   Recurrence,
   Subtask,
   SubtaskLevel,
@@ -40,6 +41,8 @@ type TaskRow = {
   progress: number | null;
   /** True for "This Evening" after-hours tasks. */
   is_evening: boolean;
+  /** Four Pillars attribution (Wealth/Health/Career/Personal_IP); null = general. */
+  life_pillar: string | null;
 };
 
 type SubtaskRow = {
@@ -270,6 +273,7 @@ function taskToRow(task: Task, userId: string): TaskRow {
     task_order: task.order,
     progress: task.progress ?? null,
     is_evening: task.isEvening ?? false,
+    life_pillar: task.lifePillar ?? null,
   };
 }
 
@@ -304,6 +308,8 @@ function rowToTask(row: TaskRow, subtasks: Subtask[]): Task {
     ...(row.progress != null ? { progress: row.progress } : {}),
     // Tolerate rows synced before the is_evening column existed.
     ...(row.is_evening ? { isEvening: true } : {}),
+    // Tolerate rows synced before the life_pillar column existed (null/undefined).
+    ...(row.life_pillar ? { lifePillar: row.life_pillar as LifePillar } : {}),
     subtasks,
   };
 }
