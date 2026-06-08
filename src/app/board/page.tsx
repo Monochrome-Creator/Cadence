@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import TextareaAutosize from "react-textarea-autosize";
 import {
   DndContext,
@@ -167,8 +167,18 @@ const RECURRENCE_LABELS: Record<Recurrence, string> = {
 const PILL_TRIGGER =
   "h-auto w-auto justify-center gap-1 rounded-full border-0 px-3 py-2 text-xs font-medium shadow-none md:w-full md:py-1";
 
+/**
+ * Desktop column template. The Task column's minimum width is driven by the
+ * `--task-col` CSS variable so a drag handle in the header can widen it; it
+ * falls back to 240px (the original responsive minimum) when unset.
+ */
 const GRID_COLS =
-  "md:grid-cols-[minmax(240px,1.4fr)_108px_100px_108px_120px_76px_68px]";
+  "md:grid-cols-[minmax(var(--task-col,240px),1.4fr)_108px_100px_108px_120px_76px_68px]";
+
+/** Drag bounds for the resizable Task column (px). Max stays within max-w-6xl. */
+const TASK_COL_MIN = 240;
+const TASK_COL_MAX = 460;
+const TASK_COL_STORAGE_KEY = "cadence:taskColWidth";
 
 /** Human-readable deadline: "29 May 2026" (two-digit day, abbr month, full year). */
 const DEADLINE_FORMAT = "dd MMM yyyy";
@@ -1189,7 +1199,7 @@ function SortableTaskCard({
                 onChange={(e) => updateTask(task.id, { title: e.target.value })}
                 placeholder="Untitled task"
                 rows={1}
-                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words text-[var(--c-ink-2)] outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] md:text-sm"
+                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words hyphens-auto text-[var(--c-ink-2)] outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] md:text-sm [overflow-wrap:break-word]"
               />
 
               {task.subtasks.length > 0 && (
@@ -1619,6 +1629,58 @@ export default function BoardPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("none");
   const [categorySort, setCategorySort] = useState<CategorySort>("none");
 
+  // Drag-to-resize for the Task column. `null` means "use the responsive
+  // default"; once the user drags, the width (px) is mirrored into the
+  // `--task-col` CSS var on the board root and persisted across sessions.
+  const boardRef = useRef<HTMLDivElement>(null);
+  // Lazily restore the persisted width. Read in the initializer (not an effect)
+  // so it never triggers a redundant re-render; the value only feeds the CSS
+  // var via the effect below, so there's no SSR hydration mismatch.
+  const [taskColWidth, setTaskColWidth] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const saved = Number(localStorage.getItem(TASK_COL_STORAGE_KEY));
+    return saved >= TASK_COL_MIN && saved <= TASK_COL_MAX ? saved : null;
+  });
+
+  useEffect(() => {
+    const root = boardRef.current;
+    if (!root) return;
+    if (taskColWidth == null) {
+      root.style.removeProperty("--task-col");
+      return;
+    }
+    root.style.setProperty("--task-col", `${taskColWidth}px`);
+    localStorage.setItem(TASK_COL_STORAGE_KEY, String(taskColWidth));
+  }, [taskColWidth]);
+
+  const startColResize = (e: React.PointerEvent<HTMLElement>) => {
+    e.preventDefault();
+    // The handle's parent is the Task header cell — its width is the current
+    // column width, giving the drag a seamless starting point.
+    const cell = e.currentTarget.parentElement;
+    const startW = cell
+      ? cell.getBoundingClientRect().width
+      : taskColWidth ?? TASK_COL_MIN;
+    const startX = e.clientX;
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(
+        TASK_COL_MAX,
+        Math.max(TASK_COL_MIN, startW + (ev.clientX - startX))
+      );
+      setTaskColWidth(Math.round(next));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   // Which category section currently has its inline "add task" row open.
   const [addingCategory, setAddingCategory] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -1890,7 +1952,7 @@ export default function BoardPage() {
   };
 
   return (
-    <div className="px-8 py-10">
+    <div ref={boardRef} className="px-8 py-10">
       <div className="mx-auto max-w-6xl">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
@@ -2129,7 +2191,16 @@ export default function BoardPage() {
                         GRID_COLS
                       )}
                     >
-                      <span>Task</span>
+                      <span className="relative flex items-center">
+                        Task
+                        <button
+                          type="button"
+                          onPointerDown={startColResize}
+                          aria-label="Drag to resize the task column"
+                          title="Drag to resize the task column"
+                          className="absolute top-1/2 -right-2 hidden h-5 w-1 -translate-y-1/2 cursor-col-resize touch-none rounded-full bg-[var(--c-line-strong)] opacity-50 transition-all hover:h-6 hover:bg-[#a35d4d] hover:opacity-100 md:block"
+                        />
+                      </span>
                       <span className="text-center">Status</span>
                       <span className="text-center">Priority</span>
                       <span className="text-center">Category</span>

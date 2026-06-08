@@ -1,15 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Inbox as InboxIcon, Plus, Trash2 } from "lucide-react";
+import { FolderInput, Inbox as InboxIcon, Plus, Trash2 } from "lucide-react";
 
 import { useProdStore, type Task } from "@/store/use-prod-store";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 /**
  * Frictionless Inbox — a brain-dump holding pen. New items are captured with a
  * single text input and nothing else: no due date, priority, or micro-tasks.
  * They land with status "Inbox" and stay off the board and dashboard until the
- * user promotes them ("Move to board" flips the status to "Not Started").
+ * user triages them: picking a category from each row's dropdown both files it
+ * under that board column and flips its status to "Not Started", dispatching it
+ * onto the board (and syncing the change to Supabase).
  */
 export default function InboxPage() {
   // Select the stable `tasks` reference and derive the filtered list with
@@ -108,10 +118,16 @@ export default function InboxPage() {
   );
 }
 
-/** A single captured item: inline-editable title + promote/delete actions. */
+/**
+ * A single captured item: inline-editable title + a "triage" category dropdown
+ * that dispatches the task to the board, plus a delete action. Selecting a
+ * category sets both `category` and `status: "Not Started"` in one update so the
+ * task leaves the Inbox and lands in the chosen board column.
+ */
 function InboxRow({ task }: { task: Task }) {
   const updateTask = useProdStore((state) => state.updateTask);
   const deleteTask = useProdStore((state) => state.deleteTask);
+  const categories = useProdStore((state) => state.categories);
 
   const [title, setTitle] = useState(task.title);
 
@@ -119,6 +135,17 @@ function InboxRow({ task }: { task: Task }) {
     const trimmed = title.trim();
     if (trimmed && trimmed !== task.title) updateTask(task.id, { title: trimmed });
     else setTitle(task.title);
+  };
+
+  const triage = (category: string | null) => {
+    if (!category) return;
+    const trimmedTitle = title.trim();
+    updateTask(task.id, {
+      // Persist any pending title edit alongside the dispatch.
+      title: trimmedTitle || task.title,
+      category,
+      status: "Not Started",
+    });
   };
 
   return (
@@ -136,16 +163,31 @@ function InboxRow({ task }: { task: Task }) {
         }}
         className="min-w-0 flex-1 bg-transparent text-[15px] text-[var(--c-ink-2)] focus:outline-none"
       />
-      <button
-        type="button"
-        onClick={() => updateTask(task.id, { status: "Not Started" })}
-        title="Move to board"
-        aria-label="Move to board"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-[var(--c-beige)] px-2.5 py-1.5 text-[12.5px] font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d] sm:px-3"
-      >
-        <span className="hidden sm:inline">Move to board</span>
-        <ArrowRight className="size-3.5" />
-      </button>
+
+      {/* Triage dropdown — choosing a category dispatches the task to the board. */}
+      <Select value="" onValueChange={triage}>
+        <SelectTrigger
+          aria-label="File under a board category"
+          title="File under a board category"
+          className={cn(
+            "h-9 w-auto shrink-0 gap-1.5 rounded-xl border-0 bg-[var(--c-beige)] px-2.5 text-[12.5px] font-medium text-[var(--c-ink-3)] shadow-none transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d] sm:px-3",
+            "[&>svg:last-child]:opacity-60"
+          )}
+        >
+          <FolderInput className="size-3.5 shrink-0" />
+          <span className="hidden sm:inline">
+            <SelectValue placeholder="File to…" />
+          </span>
+        </SelectTrigger>
+        <SelectContent align="end">
+          {categories.map((category) => (
+            <SelectItem key={category} value={category}>
+              {category}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
       <button
         type="button"
         onClick={() => deleteTask(task.id)}
