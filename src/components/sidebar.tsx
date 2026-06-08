@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useProdStore, type Task } from "@/store/use-prod-store";
 import { getSupabaseClient, isSupabaseConfigured } from "@/utils/supabase/client";
 import { TimerWidget } from "@/components/timer-widget";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -23,7 +24,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 /** Desktop sidebar links. The Pomodoro timer is the widget below, not a link. */
 const NAV_LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/board", label: "Board", icon: LayoutGrid },
+  { href: "/board", label: "Workspace", icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/goals", label: "North Star", icon: Target },
   { href: "/recurring", label: "Scheduled", icon: Repeat },
@@ -37,7 +38,7 @@ const NAV_LINKS = [
  */
 const MOBILE_NAV_LINKS = [
   { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/board", label: "Board", icon: LayoutGrid },
+  { href: "/board", label: "Workspace", icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/timer", label: "Timer", icon: Timer },
@@ -54,6 +55,29 @@ function isActiveRoute(pathname: string, href: string): boolean {
 /** Auth screens render their own full-bleed layout — no app chrome. */
 function isAuthRoute(pathname: string): boolean {
   return pathname === "/login" || pathname.startsWith("/auth");
+}
+
+/** Today as a local yyyy-MM-dd string, for lexical comparison with deadlines. */
+function todayISO(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Counts active tasks whose deadline is today or already past. "Active" excludes
+ * Done (finished) and Inbox (untriaged) tasks. Deadlines are stored as ISO-ish
+ * strings; we pull the yyyy-MM-dd and compare lexically against today.
+ */
+function countUrgentTasks(tasks: Task[]): number {
+  const today = todayISO();
+  return tasks.reduce((count, task) => {
+    if (task.status === "Done" || task.status === "Inbox") return count;
+    const iso = task.deadline?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+    return iso && iso <= today ? count + 1 : count;
+  }, 0);
 }
 
 /**
@@ -127,6 +151,10 @@ export function AccountFooter() {
 
 export function Sidebar() {
   const pathname = usePathname();
+  // Derive the urgent count with useMemo from the stable `tasks` reference —
+  // computing inside the selector would return a new value each render.
+  const tasks = useProdStore((state) => state.tasks);
+  const urgentCount = useMemo(() => countUrgentTasks(tasks), [tasks]);
 
   if (isAuthRoute(pathname)) return null;
 
@@ -160,7 +188,20 @@ export function Sidebar() {
               )}
             >
               <Icon className={cn("size-4", active && "text-[#a35d4d]")} />
-              {label}
+              <span className="flex-1">{label}</span>
+              {href === "/board" && urgentCount > 0 && (
+                <span
+                  title={`${urgentCount} task${
+                    urgentCount === 1 ? "" : "s"
+                  } due today or overdue`}
+                  aria-label={`${urgentCount} urgent task${
+                    urgentCount === 1 ? "" : "s"
+                  }`}
+                  className="flex min-w-[20px] items-center justify-center rounded-full bg-[#c2410c] px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-white"
+                >
+                  {urgentCount}
+                </span>
+              )}
             </Link>
           );
         })}

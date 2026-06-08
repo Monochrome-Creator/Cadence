@@ -1686,6 +1686,8 @@ export default function BoardPage() {
   const [newTitle, setNewTitle] = useState("");
   // Optional life pillar to stamp on the task being composed.
   const [newPillar, setNewPillar] = useState<LifePillar | undefined>(undefined);
+  // Optional deadline (yyyy-MM-dd) to stamp on the task being composed.
+  const [newDeadline, setNewDeadline] = useState("");
 
   // Inline category header rename + the bottom "new category" composer.
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
@@ -1886,24 +1888,27 @@ export default function BoardPage() {
       title,
       status: "Not Started",
       priority: "Medium",
-      deadline: "",
+      deadline: newDeadline,
       pomodorosLogged: 0,
       category,
       ...(newPillar ? { lifePillar: newPillar } : {}),
     });
     setNewTitle("");
+    setNewDeadline("");
   };
 
   const startAdding = (category: string) => {
     setAddingCategory(category);
     setNewTitle("");
     setNewPillar(undefined);
+    setNewDeadline("");
   };
 
   const cancelAdding = () => {
     setAddingCategory(null);
     setNewTitle("");
     setNewPillar(undefined);
+    setNewDeadline("");
   };
 
   /* ----------------------------- category CRUD ---------------------------- */
@@ -2266,9 +2271,18 @@ export default function BoardPage() {
                             <X className="size-4" />
                           </button>
                         </div>
-                        <div className="flex items-center gap-2 pl-8 text-[12px] text-[var(--c-dim)]">
-                          <span>Life pillar:</span>
-                          <PillarSelect value={newPillar} onChange={setNewPillar} />
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pl-8 text-[12px] text-[var(--c-dim)]">
+                          <div className="flex items-center gap-2">
+                            <span>Life pillar:</span>
+                            <PillarSelect value={newPillar} onChange={setNewPillar} />
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span>Deadline:</span>
+                            <DeadlineField
+                              value={newDeadline}
+                              onChange={setNewDeadline}
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : (
