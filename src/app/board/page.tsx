@@ -173,10 +173,10 @@ const PILL_TRIGGER =
  * falls back to 240px (the original responsive minimum) when unset.
  */
 const GRID_COLS =
-  "md:grid-cols-[minmax(var(--task-col,240px),1.4fr)_108px_100px_108px_120px_76px_68px]";
+  "xl:grid-cols-[minmax(var(--task-col,290px),1.4fr)_108px_90px_108px_104px_68px_68px]";
 
 /** Drag bounds for the resizable Task column (px). Max stays within max-w-6xl. */
-const TASK_COL_MIN = 240;
+const TASK_COL_MIN = 260;
 const TASK_COL_MAX = 460;
 const TASK_COL_STORAGE_KEY = "cadence:taskColWidth";
 
@@ -1111,15 +1111,17 @@ function SortableTaskCard({
         isDragging && "opacity-40"
       )}
     >
-      {/* Main row — stacks on mobile, becomes a 6-column grid on desktop. */}
+      {/* Main row — stays stacked (full-width title) on narrow/windowed
+          screens, becoming the multi-column grid only at xl (≥1280px) where
+          there's room for it without crushing the title. */}
       <div
         className={cn(
-          "flex flex-col gap-3 p-4 md:grid md:items-center md:gap-4",
+          "flex flex-col gap-3 p-4 xl:grid xl:items-center xl:gap-3",
           GRID_COLS
         )}
       >
         {/* Drag handle + expand chevron + focus + title */}
-        <div className="flex min-w-0 items-start gap-1.5 md:items-center">
+        <div className="flex min-w-0 items-start gap-1.5 xl:items-center">
           <button
             type="button"
             {...attributes}
@@ -1127,9 +1129,10 @@ function SortableTaskCard({
             aria-label="Drag to reorder"
             disabled={!dragEnabled}
             className={cn(
-              // Hidden on mobile: a 24px touch-drag handle is impractical and
-              // crowds the title. Reordering stays available on desktop.
-              "hidden size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-line-strong)] transition-colors md:flex",
+              // Hidden until the grid layout: a 24px touch-drag handle is
+              // impractical and crowds the title. Reordering stays available
+              // on wide screens where the grid is shown.
+              "hidden size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-line-strong)] transition-colors xl:flex",
               dragEnabled
                 ? "cursor-grab hover:bg-[var(--c-beige)] hover:text-[var(--c-dim)] active:cursor-grabbing"
                 : "cursor-not-allowed opacity-30"
@@ -1199,7 +1202,7 @@ function SortableTaskCard({
                 onChange={(e) => updateTask(task.id, { title: e.target.value })}
                 placeholder="Untitled task"
                 rows={1}
-                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words hyphens-auto text-[var(--c-ink-2)] outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] md:text-sm [overflow-wrap:break-word]"
+                className="min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-2 py-1 text-base leading-snug font-medium break-words hyphens-auto text-[var(--c-ink-2)] outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] xl:text-sm [overflow-wrap:break-word]"
               />
 
               {task.subtasks.length > 0 && (
@@ -1241,11 +1244,11 @@ function SortableTaskCard({
           </div>
         </div>
 
-        {/* Secondary controls: a tidy 2-column grid on mobile (Status | Priority,
-            full-width Category, Sessions | Actions); flattened into the desktop
-            grid columns via display:contents (md:contents), so these base grid
-            classes never affect the desktop layout. */}
-        <div className="grid grid-cols-2 items-center gap-2 md:contents">
+        {/* Secondary controls: a tidy 2-column grid on narrow/windowed screens
+            (Status | Priority, full-width Category, Sessions | Actions);
+            flattened into the wide-screen grid columns via display:contents
+            (xl:contents), so these base grid classes never affect that layout. */}
+        <div className="grid grid-cols-2 items-center gap-2 xl:contents">
           {/* Status pill */}
           <Select
           value={task.status}
@@ -1296,13 +1299,14 @@ function SortableTaskCard({
           placeholder="Category"
           aria-label="Task category"
           className={cn(
-            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[var(--c-faint)] focus:ring-2 focus:ring-[#a35d4d]/25 md:col-auto md:w-full md:py-1",
+            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[var(--c-faint)] focus:ring-2 focus:ring-[#a35d4d]/25 xl:col-auto xl:w-full xl:py-1",
             theme.pill
           )}
         />
 
-        {/* Deadline (date-fns formatted) — hidden on small phone screens */}
-        <div className="hidden md:block">
+        {/* Deadline (date-fns formatted) — shown inline only in the grid layout;
+            surfaced in the expand panel below at narrower widths. */}
+        <div className="hidden xl:block">
           <DeadlineField
             value={task.deadline}
             onChange={(next) => updateTask(task.id, { deadline: next })}
@@ -1316,7 +1320,7 @@ function SortableTaskCard({
         />
 
           {/* Actions: recurrence + delete */}
-          <div className="ml-auto flex items-center justify-center gap-1 md:ml-0">
+          <div className="ml-auto flex items-center justify-center gap-1 xl:ml-0">
             {/* Recurrence — subtle loop button; tinted when a repeat is set */}
             <Select
               value={task.recurrence}
@@ -1382,9 +1386,9 @@ function SortableTaskCard({
         )}
       >
         <div className="overflow-hidden">
-          {/* Mobile-only: the Deadline column is hidden in the row on phones,
+          {/* When the grid isn't shown, the inline Deadline column is hidden,
               so it's surfaced here in the expandable view instead of dropped. */}
-          <div className="border-t border-[var(--c-line-2)] px-4 py-3 md:hidden">
+          <div className="border-t border-[var(--c-line-2)] px-4 py-3 xl:hidden">
             <p className="mb-1 text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
               Deadline
             </p>
@@ -2192,7 +2196,7 @@ export default function BoardPage() {
                     {/* Column labels (md and up) */}
                     <div
                       className={cn(
-                        "mb-3 hidden border border-l-4 border-transparent px-4 text-xs font-semibold tracking-wide text-[var(--c-faint)] uppercase md:grid md:items-center md:gap-4",
+                        "mb-3 hidden border border-l-4 border-transparent px-4 text-xs font-semibold tracking-wide text-[var(--c-faint)] uppercase xl:grid xl:items-center xl:gap-3",
                         GRID_COLS
                       )}
                     >
@@ -2203,7 +2207,7 @@ export default function BoardPage() {
                           onPointerDown={startColResize}
                           aria-label="Drag to resize the task column"
                           title="Drag to resize the task column"
-                          className="absolute top-1/2 -right-2 hidden h-5 w-1 -translate-y-1/2 cursor-col-resize touch-none rounded-full bg-[var(--c-line-strong)] opacity-50 transition-all hover:h-6 hover:bg-[#a35d4d] hover:opacity-100 md:block"
+                          className="absolute top-1/2 -right-2 hidden h-5 w-1 -translate-y-1/2 cursor-col-resize touch-none rounded-full bg-[var(--c-line-strong)] opacity-50 transition-all hover:h-6 hover:bg-[#a35d4d] hover:opacity-100 xl:block"
                         />
                       </span>
                       <span className="text-center">Status</span>
