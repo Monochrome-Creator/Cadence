@@ -29,6 +29,7 @@ import {
   ArrowUp,
   CalendarDays,
   Check,
+  CalendarPlus,
   ChevronDown,
   ChevronRight,
   CornerDownRight,
@@ -69,6 +70,10 @@ import {
 } from "@/store/use-prod-store";
 import { PILLAR_THEME } from "@/lib/life-pillars";
 import { cn } from "@/lib/utils";
+import {
+  DeadlineReminderModal,
+  isMissingDeadline,
+} from "@/components/deadline-reminder-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -1618,6 +1623,15 @@ export default function BoardPage() {
   const reorderCategories = useProdStore((state) => state.reorderCategories);
   const forceSync = useProdStore((state) => state.forceSync);
 
+  // Missing-deadline reminder popup. The modal auto-opens itself (snooze
+  // rules live inside it); this button-driven state also lets the header
+  // trigger reopen it after a dismissal.
+  const [deadlineNudgeOpen, setDeadlineNudgeOpen] = useState(false);
+  const missingDeadlineCount = useMemo(
+    () => tasks.filter(isMissingDeadline).length,
+    [tasks]
+  );
+
   // Manual cloud refresh — spins the icon while the round-trip is in flight.
   const [isRefreshing, setIsRefreshing] = useState(false);
   const handleRefresh = async () => {
@@ -2066,6 +2080,23 @@ export default function BoardPage() {
               <span className="hidden sm:inline">Refresh</span>
             </Button>
 
+            {/* Reopens the missing-deadline popup even after it was snoozed. */}
+            <Button
+              variant="outline"
+              onClick={() => setDeadlineNudgeOpen(true)}
+              title="Set missing deadlines"
+              aria-label="Set missing deadlines"
+              className="h-9 min-w-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+            >
+              <CalendarPlus className="size-4" />
+              <span className="hidden sm:inline">Set missing deadlines</span>
+              {missingDeadlineCount > 0 && (
+                <span className="flex size-5 items-center justify-center rounded-full bg-[#a35d4d] text-[11px] font-semibold text-white">
+                  {missingDeadlineCount}
+                </span>
+              )}
+            </Button>
+
             <LevelGuideTooltip />
           </div>
         </header>
@@ -2413,6 +2444,14 @@ export default function BoardPage() {
           </DndContext>
         )}
       </div>
+
+      {/* Friendly nudge for active tasks without a deadline. Auto-opens on a
+          snooze-aware schedule; the header button reopens it any time. */}
+      <DeadlineReminderModal
+        open={deadlineNudgeOpen}
+        onClose={() => setDeadlineNudgeOpen(false)}
+        onAutoOpen={() => setDeadlineNudgeOpen(true)}
+      />
     </div>
   );
 }
