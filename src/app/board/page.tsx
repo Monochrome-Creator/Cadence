@@ -272,42 +272,34 @@ function DeadlineField({
   value: string;
   onChange: (next: string) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const display = formatDeadline(value);
-
-  const openPicker = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (typeof el.showPicker === "function") {
-      el.showPicker();
-    } else {
-      el.focus();
-    }
-  };
+  const iso = toDateInputValue(value);
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={openPicker}
-        className={cn(
-          "flex w-full items-center gap-1.5 rounded-md border border-transparent px-2 py-1.5 text-sm transition-colors hover:border-[var(--c-line)]",
-          display ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
-        )}
-      >
-        <CalendarDays className="size-3.5 shrink-0 text-[var(--c-faint)]" />
-        {display || "Set date"}
-      </button>
-      {/* Native picker drives the value; visually hidden but still focusable. */}
-      <input
-        ref={inputRef}
-        type="date"
-        value={toDateInputValue(value)}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label="Pick a deadline"
-        className="pointer-events-none absolute bottom-0 left-2 size-0 opacity-0"
-        tabIndex={-1}
-      />
+    <div className="flex w-full items-center gap-2">
+      <label className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-3 py-2 text-[var(--c-ink-3)] transition-colors focus-within:border-[#a35d4d] focus-within:ring-2 focus-within:ring-[#a35d4d]/15 md:min-h-0 md:rounded-md md:border-transparent md:bg-transparent md:px-2 md:py-1.5">
+        <CalendarDays className="size-4 shrink-0 text-[var(--c-faint)] md:size-3.5" />
+        <span className="sr-only">Pick a deadline</span>
+        <input
+          type="date"
+          value={iso}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label="Pick a deadline"
+          className={cn(
+            "min-h-9 min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-[16px] font-medium outline-none [color-scheme:light] dark:[color-scheme:dark] md:min-h-0 md:text-sm",
+            iso ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
+          )}
+        />
+      </label>
+      {iso && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label="Clear deadline"
+          className="shrink-0 rounded-full px-2 py-1 text-xs font-medium text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+        >
+          Clear
+        </button>
+      )}
     </div>
   );
 }
@@ -374,41 +366,38 @@ function MicroDeadlineField({
   value: string;
   onChange: (next: string) => void;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const display = formatCompactDeadline(value);
-
-  const openPicker = () => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (typeof el.showPicker === "function") el.showPicker();
-    else el.focus();
-  };
 
   return (
     <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={openPicker}
+      <span
+        aria-hidden
         title={display ? `Due ${display}` : "Set micro-task deadline"}
-        aria-label={
-          display ? `Deadline ${display}, click to change` : "Set micro-task deadline"
-        }
         className={cn(
-          "flex items-center gap-1 rounded-md border border-transparent px-1.5 py-1 text-[11px] transition-colors hover:border-[var(--c-line)]",
+          "flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-md border border-transparent px-2 py-1.5 text-xs transition-colors hover:border-[var(--c-line)] md:min-h-0 md:min-w-0 md:px-1.5 md:py-1 md:text-[11px]",
           display ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
         )}
       >
-        <CalendarDays className="size-3.5 shrink-0 text-[var(--c-faint)]" />
+        <CalendarDays className="size-4 shrink-0 text-[var(--c-faint)] md:size-3.5" />
         {display && <span className="tabular-nums">{display}</span>}
-      </button>
+      </span>
+      {/* Same overlay pattern as DeadlineField: the tap hits the native input
+          itself, so the OS picker opens reliably on mobile. */}
       <input
-        ref={inputRef}
         type="date"
         value={toDateInputValue(value)}
         onChange={(e) => onChange(e.target.value)}
-        aria-label="Pick a micro-task deadline"
-        className="pointer-events-none absolute bottom-0 left-1.5 size-0 opacity-0"
-        tabIndex={-1}
+        onClick={(e) => {
+          try {
+            e.currentTarget.showPicker?.();
+          } catch {
+            // Native focus already opens the picker where showPicker is unsupported.
+          }
+        }}
+        aria-label={
+          display ? `Deadline ${display}, tap to change` : "Set micro-task deadline"
+        }
+        className="absolute inset-0 size-full cursor-pointer opacity-0"
       />
     </div>
   );
@@ -441,7 +430,7 @@ function PercentControl({
       <span
         title="Auto-calculated from the average of its sub-tasks"
         aria-label={`Rolled-up progress ${percent} percent`}
-        className="flex shrink-0 items-center rounded-md bg-[var(--c-beige-2)] px-1.5 py-1 text-[11px] font-semibold tabular-nums text-[#5f7d56]"
+        className="flex shrink-0 items-center rounded-md bg-[var(--c-beige-2)] px-2 py-1.5 text-xs font-semibold tabular-nums text-[#5f7d56] md:px-1.5 md:py-1 md:text-[11px]"
       >
         {percent}%
       </span>
@@ -450,7 +439,7 @@ function PercentControl({
   return (
     <label
       title="Completion percent"
-      className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#6f9e6a]/40 bg-[var(--c-panel-soft)] px-1.5 py-0.5 text-[11px] font-semibold text-[#5f7d56] transition-colors focus-within:border-[#6f9e6a]"
+      className="flex shrink-0 items-center gap-0.5 rounded-md border border-[#6f9e6a]/40 bg-[var(--c-panel-soft)] px-2 py-1 text-xs font-semibold text-[#5f7d56] transition-colors focus-within:border-[#6f9e6a] md:px-1.5 md:py-0.5 md:text-[11px]"
     >
       <input
         type="number"
@@ -483,7 +472,7 @@ function PercentControl({
           setDraft(String(next));
           onChange(next);
         }}
-        className="w-7 border-0 bg-transparent p-0 text-right text-[11px] font-semibold tabular-nums text-[#5f7d56] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-8 border-0 bg-transparent p-0 text-right text-xs font-semibold tabular-nums text-[#5f7d56] outline-none [appearance:textfield] md:w-7 md:text-[11px] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       %
     </label>
@@ -607,12 +596,13 @@ function SortableMicroTask({
         />
       )}
 
-      <div className="flex flex-1 items-start gap-2 rounded-lg bg-[var(--c-panel-soft)] px-2 py-1.5">
-        {/* Drag handle — hover-revealed, reorders this row up/down. */}
+      <div className="flex flex-1 items-start gap-2 rounded-lg bg-[var(--c-panel-soft)] px-2 py-2 md:py-1.5">
+        {/* Drag handle — hover-revealed; hidden on touch screens where a 20px
+            grab target is impractical (same call as the card-level handle). */}
         <button
           type="button"
           aria-label="Drag to reorder micro-task"
-          className="mt-0.5 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100 active:cursor-grabbing"
+          className="mt-0.5 hidden size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100 active:cursor-grabbing md:flex"
           {...attributes}
           {...listeners}
         >
@@ -624,13 +614,13 @@ function SortableMicroTask({
           aria-label={done ? "Mark as to-do" : "Mark as done"}
           onClick={() => toggleComplete(taskId, subtask.id)}
           className={cn(
-            "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+            "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors md:size-5",
             done
               ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
               : "border-[var(--c-line-strong)] text-transparent hover:border-[#a35d4d]"
           )}
         >
-          <Check className="size-3" />
+          <Check className="size-4 md:size-3" />
         </button>
 
         {/* Click the badge to cycle this micro-task's depth. */}
@@ -644,7 +634,7 @@ function SortableMicroTask({
           title={`Level ${subtask.level} — click to change depth`}
           aria-label={`Micro-task level ${subtask.level}, click to cycle`}
           className={cn(
-            "mt-0.5 shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide transition-transform hover:scale-105 active:scale-95",
+            "mt-0.5 shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] font-semibold tracking-wide transition-transform hover:scale-105 active:scale-95 md:px-1.5 md:py-0.5 md:text-[10px]",
             LEVEL_BADGE[subtask.level]
           )}
         >
@@ -671,7 +661,7 @@ function SortableMicroTask({
           placeholder="Micro-task…"
           rows={1}
           className={cn(
-            "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-snug outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] focus:bg-[var(--c-panel)]",
+            "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-1 text-[15px] leading-snug outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] focus:bg-[var(--c-panel)] md:py-0.5 md:text-sm",
             done ? "text-[var(--c-faint)] line-through" : "text-[var(--c-ink-2)]"
           )}
         />
@@ -693,26 +683,28 @@ function SortableMicroTask({
           />
         </span>
 
-        {/* Hover-revealed inline "add child" affordance. */}
+        {/* Inline "add child" affordance — always visible on touch screens
+            (hover-reveal would make it undiscoverable there), hover-revealed
+            on desktop as before. */}
         <button
           type="button"
           onClick={() => insertChild(subtask.id, subtask.level)}
           title={`Add ${DEEPER_LEVEL[subtask.level]} below`}
           aria-label={`Add ${DEEPER_LEVEL[subtask.level]} micro-task below`}
-          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] focus-visible:opacity-100 group-hover/sub:opacity-100"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-100 transition-all hover:bg-[var(--c-beige)] hover:text-[#a35d4d] focus-visible:opacity-100 md:size-5 md:opacity-0 md:group-hover/sub:opacity-100"
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-4 md:size-3.5" />
         </button>
 
-        {/* Hover-revealed delete — drops this row and its children. */}
+        {/* Delete — same touch-visible treatment; drops this row and its children. */}
         <button
           type="button"
           onClick={() => deleteSubtask(taskId, subtask.id)}
           title={`Delete this ${subtask.level} micro-task`}
           aria-label={`Delete ${subtask.level} micro-task`}
-          className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-0 transition-all hover:bg-[#f6e0e0] hover:text-[#9b3b3b] focus-visible:opacity-100 group-hover/sub:opacity-100"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] opacity-100 transition-all hover:bg-[#f6e0e0] hover:text-[#9b3b3b] focus-visible:opacity-100 md:size-5 md:opacity-0 md:group-hover/sub:opacity-100"
         >
-          <Trash2 className="size-3.5" />
+          <Trash2 className="size-4 md:size-3.5" />
         </button>
       </div>
     </div>
@@ -787,8 +779,8 @@ function MicroTaskPanel({ task }: { task: Task }) {
           />
         </label>
 
-        <p className="mb-2 px-1 text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
-          Micro-tasks
+        <p className="mb-2 px-1 text-xs font-semibold tracking-wide text-[var(--c-dim)] uppercase md:text-[11px]">
+          Micro-tasks — break this task into small steps
         </p>
 
         <div className="space-y-1">
@@ -841,7 +833,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
                 aria-pressed={newLevel === level}
                 title={`Add as ${level} micro-task`}
                 className={cn(
-                  "rounded-full px-2.5 py-1 text-[11px] font-semibold transition-all",
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition-all md:px-2.5 md:py-1 md:text-[11px]",
                   newLevel === level
                     ? "bg-[#a35d4d] text-white shadow-[0_1px_2px_rgba(74,64,54,0.18)]"
                     : "text-[var(--c-dim)] hover:text-[#a35d4d]"
@@ -858,13 +850,13 @@ function MicroTaskPanel({ task }: { task: Task }) {
               if (e.key === "Enter") commitSubtask();
             }}
             placeholder={`New ${newLevel} micro-task…`}
-            className="h-8 min-w-0 flex-1 border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] text-sm text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
+            className="h-10 min-w-0 flex-1 border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] text-[15px] text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d] md:h-8 md:text-sm"
           />
           <Button
             size="sm"
             onClick={commitSubtask}
             disabled={newSubtask.trim().length === 0}
-            className="h-8 shrink-0 bg-[#a35d4d] text-white hover:bg-[#8f4f41] disabled:opacity-40"
+            className="h-10 shrink-0 bg-[#a35d4d] text-white hover:bg-[#8f4f41] disabled:opacity-40 md:h-8"
           >
             <Plus className="size-3.5" />
             Add Micro-task
@@ -906,7 +898,7 @@ function PillarSelect({
         aria-label="Set life pillar"
         title={value ? `Pillar: ${PILLAR_THEME[value].label}` : "Assign a life pillar"}
         className={cn(
-          "h-auto w-auto justify-center gap-1 rounded-full border-0 px-2 py-0.5 text-[11px] font-medium shadow-none [&>svg:last-child]:hidden",
+          "h-auto w-auto justify-center gap-1 rounded-full border-0 px-2.5 py-1.5 text-xs font-medium shadow-none md:px-2 md:py-0.5 md:text-[11px] [&>svg:last-child]:hidden",
           value
             ? PILLAR_THEME[value].badge
             : "bg-[var(--c-panel-soft)] text-[var(--c-dim)] hover:text-[#a35d4d]"
@@ -967,7 +959,7 @@ function GoalSelect({
         aria-label="Link to a goal"
         title={linked ? `Goal: ${linked.title}` : "Link to a North Star goal"}
         className={cn(
-          "h-auto w-auto max-w-[140px] justify-center gap-1 rounded-full border-0 px-2 py-0.5 text-[11px] font-medium shadow-none [&>svg:last-child]:hidden",
+          "h-auto w-auto max-w-[140px] justify-center gap-1 rounded-full border-0 px-2.5 py-1.5 text-xs font-medium shadow-none md:px-2 md:py-0.5 md:text-[11px] [&>svg:last-child]:hidden",
           linked
             ? "bg-[#f6e6da] text-[#a35d4d]"
             : "bg-[var(--c-panel-soft)] text-[var(--c-dim)] hover:text-[#a35d4d]"
@@ -1120,8 +1112,9 @@ function SortableTaskCard({
           GRID_COLS
         )}
       >
-        {/* Drag handle + expand chevron + focus + title */}
-        <div className="flex min-w-0 items-start gap-1.5 xl:items-center">
+        {/* Task header. On phones the title stays first, then Focus and Complete
+            become separate full-width rows so they cannot be mis-tapped. */}
+        <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2.5 md:flex md:items-start md:gap-1.5 xl:items-center">
           <button
             type="button"
             {...attributes}
@@ -1152,7 +1145,7 @@ function SortableTaskCard({
             onClick={() => setExpanded((v) => !v)}
             aria-expanded={expanded}
             aria-label={expanded ? "Collapse micro-tasks" : "Expand micro-tasks"}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+            className="order-1 flex size-9 shrink-0 items-center justify-center rounded-md text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d] md:order-none md:size-6"
           >
             <ChevronRight
               className={cn(
@@ -1165,15 +1158,17 @@ function SortableTaskCard({
           <button
             type="button"
             title={isActive ? "Active focus task" : "Set as focus task"}
+            aria-label={isActive ? "Active focus task" : "Set as focus task"}
             onClick={() => setActiveTask(isActive ? null : task.id)}
             className={cn(
-              "flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+              "order-3 col-span-2 flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium transition-colors md:order-none md:size-7 md:min-h-0 md:w-auto md:rounded-full md:p-0",
               isActive
                 ? "bg-[#a35d4d] text-white"
                 : "bg-[var(--c-beige)] text-[var(--c-dim)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
             )}
           >
-            <Target className="size-3.5" />
+            <Target className="size-4 md:size-3.5" />
+            <span className="md:hidden">{isActive ? "Focused task" : "Set focus"}</span>
           </button>
 
           {/* Completion circle — force-complete (or reopen) the whole task. */}
@@ -1183,19 +1178,27 @@ function SortableTaskCard({
             aria-label={isDone ? "Mark task as not done" : "Mark task complete"}
             title={isDone ? "Completed — click to reopen" : "Mark complete"}
             className={cn(
-              "flex size-7 shrink-0 items-center justify-center rounded-full border transition-colors",
+              "order-4 col-span-2 flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium transition-colors md:order-none md:size-7 md:min-h-0 md:w-auto md:rounded-full md:p-0",
               isDone
                 ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
                 : "border-[var(--c-line-strong)] text-transparent hover:border-[#6f9e6a] hover:text-[#6f9e6a]"
             )}
           >
-            <Check className="size-3.5" />
+            <Check className="size-4 md:size-3.5" />
+            <span
+              className={cn(
+                "md:hidden",
+                isDone ? "text-white" : "text-[var(--c-ink-3)]"
+              )}
+            >
+              {isDone ? "Reopen task" : "Complete task"}
+            </span>
           </button>
 
           {/* Title gets its own full-width column; the subtask count rides
               alongside, and the sub-category sits on its own line below so it
               never squeezes the title. */}
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="order-2 flex min-w-0 flex-1 flex-col gap-1 md:order-none">
             <div className="flex items-center gap-2">
               <TextareaAutosize
                 value={task.title}
@@ -1212,7 +1215,7 @@ function SortableTaskCard({
               )}
             </div>
 
-            <div className="ml-2 flex flex-wrap items-center gap-1.5">
+            <div className="ml-2 flex flex-wrap items-center gap-2 md:gap-1.5">
               <PillarSelect
                 value={task.lifePillar}
                 onChange={(next) => updateTask(task.id, { lifePillar: next })}

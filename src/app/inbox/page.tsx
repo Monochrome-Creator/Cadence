@@ -138,7 +138,9 @@ function InboxRow({ task }: { task: Task }) {
   };
 
   const triage = (category: string | null) => {
-    if (!category) return;
+    // Guard against empty/stale values (e.g. a category deleted on another
+    // device after this list rendered) — never silently file the task.
+    if (!category?.trim() || !categories.includes(category)) return;
     const trimmedTitle = title.trim();
     updateTask(task.id, {
       // Persist any pending title edit alongside the dispatch.
@@ -164,23 +166,24 @@ function InboxRow({ task }: { task: Task }) {
         className="min-w-0 flex-1 bg-transparent text-[15px] text-[var(--c-ink-2)] focus:outline-none"
       />
 
-      {/* Triage dropdown — choosing a category dispatches the task to the board. */}
+      {/* Triage dropdown — choosing a category dispatches the task to the
+          board. The "File to…" label stays visible on mobile too, so picking a
+          destination is an obvious, deliberate step (nothing defaults to
+          General). */}
       <Select value="" onValueChange={triage}>
         <SelectTrigger
           aria-label="File under a board category"
           title="File under a board category"
           className={cn(
-            "h-9 w-auto shrink-0 gap-1.5 rounded-xl border-0 bg-[var(--c-beige)] px-2.5 text-[12.5px] font-medium text-[var(--c-ink-3)] shadow-none transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d] sm:px-3",
+            "h-10 w-auto shrink-0 gap-1.5 rounded-xl border-0 bg-[var(--c-beige)] px-3 text-[13px] font-medium text-[var(--c-ink-3)] shadow-none transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d] sm:h-9 sm:text-[12.5px]",
             "[&>svg:last-child]:opacity-60"
           )}
         >
           <FolderInput className="size-3.5 shrink-0" />
-          <span className="hidden sm:inline">
-            <SelectValue placeholder="File to…" />
-          </span>
+          <SelectValue placeholder="File to…" />
         </SelectTrigger>
         <SelectContent align="end">
-          {categories.map((category) => (
+          {categories.filter((category) => category.trim()).map((category) => (
             <SelectItem key={category} value={category}>
               {category}
             </SelectItem>
