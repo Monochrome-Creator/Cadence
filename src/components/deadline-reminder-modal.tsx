@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Bell, CalendarClock, X } from "lucide-react";
+import { Bell, CalendarClock, Check, X } from "lucide-react";
 
-import { useProdStore, type Task } from "@/store/use-prod-store";
+import { NO_DEADLINE, useProdStore, type Task } from "@/store/use-prod-store";
 import { cn } from "@/lib/utils";
 
 /* -------------------------------------------------------------------------- */
@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 /**
  * An active board task that should have a deadline but doesn't. Done tasks are
  * finished and Inbox tasks haven't been triaged yet, so neither is nagged.
+ * A task explicitly marked "no deadline" (the NO_DEADLINE sentinel) opted out.
  */
 export function isMissingDeadline(task: Task): boolean {
   return (
@@ -187,8 +188,10 @@ export function DeadlineReminderModal({
         {/* Scrollable task list */}
         <div className="min-h-0 flex-1 overflow-y-auto px-5">
           <div className="flex flex-col gap-3 pb-2">
+            {/* div, not label: a wrapping label would re-route taps on the
+                "No deadline needed" button into the date input. */}
             {missing.map((task) => (
-              <label
+              <div
                 key={task.id}
                 className="flex flex-col gap-1.5 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-3"
               >
@@ -200,7 +203,11 @@ export function DeadlineReminderModal({
                 </span>
                 <input
                   type="date"
-                  value={drafts[task.id] ?? ""}
+                  value={
+                    drafts[task.id] === NO_DEADLINE
+                      ? ""
+                      : (drafts[task.id] ?? "")
+                  }
                   onChange={(e) =>
                     setDrafts((prev) => ({
                       ...prev,
@@ -210,7 +217,31 @@ export function DeadlineReminderModal({
                   aria-label={`Deadline for ${task.title || "untitled task"}`}
                   className="mt-0.5 block min-h-11 w-full appearance-none rounded-lg border border-[var(--c-line-strong)] bg-[var(--c-panel)] px-3 text-[16px] font-medium text-[var(--c-ink-2)] outline-none transition-colors [color-scheme:light] focus:border-[#a35d4d] focus:ring-2 focus:ring-[#a35d4d]/15 md:text-sm dark:[color-scheme:dark]"
                 />
-              </label>
+                {/* Opt this task out of deadlines entirely — it leaves the
+                    reminder for good (until the deadline is cleared again). */}
+                <button
+                  type="button"
+                  aria-pressed={drafts[task.id] === NO_DEADLINE}
+                  onClick={() =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [task.id]:
+                        prev[task.id] === NO_DEADLINE ? "" : NO_DEADLINE,
+                    }))
+                  }
+                  className={cn(
+                    "mt-1 flex min-h-9 items-center gap-1.5 self-start rounded-full border px-3 text-[13px] font-medium transition-colors",
+                    drafts[task.id] === NO_DEADLINE
+                      ? "border-[#a35d4d]/30 bg-[var(--c-beige-2)] text-[#a35d4d]"
+                      : "border-[var(--c-line)] bg-transparent text-[var(--c-dim)] hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-3)]"
+                  )}
+                >
+                  {drafts[task.id] === NO_DEADLINE && (
+                    <Check className="size-3.5" />
+                  )}
+                  No deadline needed
+                </button>
+              </div>
             ))}
           </div>
         </div>

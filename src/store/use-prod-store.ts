@@ -77,12 +77,24 @@ export interface Subtask {
   deadline?: string;
 }
 
+/**
+ * Sentinel stored in `Task.deadline` when the user explicitly chose "this task
+ * needs no deadline" (vs. "" = simply not set yet). It flows through Supabase
+ * unchanged (the column is text) and every renderer extracts yyyy-MM-dd before
+ * displaying, so it never shows up as literal text — but it keeps the task out
+ * of the missing-deadline reminder.
+ */
+export const NO_DEADLINE = "none";
+
 export interface Task {
   id: string;
   title: string;
   status: TaskStatus;
   priority: TaskPriority;
-  /** Due date stored as a yyyy-MM-dd string ("" when unset). */
+  /**
+   * Due date stored as a yyyy-MM-dd string. "" when unset; the {@link NO_DEADLINE}
+   * sentinel when the user explicitly opted out of a deadline.
+   */
   deadline: string;
   /** Free-form grouping label. Defaults to "General". */
   category: string;
