@@ -246,6 +246,18 @@ export default function LoginPage() {
           </button>
         </p>
 
+        {/* Plain <a> (not <Link>): /reset is a route handler whose
+            Clear-Site-Data header only takes effect on a full document load. */}
+        <p className="mt-4 text-center text-xs text-[var(--c-faint)]">
+          Trouble loading the app?{" "}
+          <a
+            href="/reset"
+            className="font-medium text-[var(--c-dim)] underline transition-colors hover:text-[#a35d4d]"
+          >
+            Reset this device
+          </a>
+        </p>
+
         {!isSupabaseConfigured && (
           <p className="mt-6 rounded-xl bg-[var(--c-beige)] px-4 py-3 text-center text-xs text-[#8a7d6b]">
             Cloud sync isn&apos;t set up yet. Add your Supabase keys to{" "}

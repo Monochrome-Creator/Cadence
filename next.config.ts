@@ -30,6 +30,20 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The recovery page must always come from the network — a cached copy
+        // would replay a stale Clear-Site-Data response (or none at all).
+        source: "/reset",
+        headers: [
+          { key: "Cache-Control", value: "no-store, no-cache, must-revalidate" },
+        ],
+      },
+      {
+        // An old service worker may still request this fallback; let it
+        // revalidate every time so it can never pin a stale copy.
+        source: "/offline.html",
+        headers: [{ key: "Cache-Control", value: "no-cache, must-revalidate" }],
+      },
+      {
         source: "/(.*)",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
