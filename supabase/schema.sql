@@ -73,6 +73,11 @@ create table if not exists public.tasks (
   -- "This Evening" flag: surfaces the task under a separate after-hours header
   -- on the dashboard. Defaults false (a normal daytime task).
   is_evening       boolean not null default false,
+  -- GTD "Today" promotion flag. A workspace task (status <> 'Inbox') with
+  -- is_today=true is a non-negotiable Daily Action item shown on the Dashboard;
+  -- false keeps it in the Workspace master backlog. Capped at 5 active per day
+  -- client-side. Defaults false.
+  is_today         boolean not null default false,
   -- "Four Pillars" life-area attribution. Null for general/untagged tasks.
   life_pillar      text
                      check (life_pillar is null or life_pillar in ('Wealth', 'Health', 'Career', 'Personal_IP')),
@@ -100,6 +105,10 @@ alter table public.tasks
 -- Existing installs: add the "This Evening" after-hours flag.
 alter table public.tasks
   add column if not exists is_evening boolean not null default false;
+
+-- Existing installs: add the GTD "Today" promotion flag.
+alter table public.tasks
+  add column if not exists is_today boolean not null default false;
 
 -- Existing installs: add the manual completion-percent override column.
 alter table public.tasks

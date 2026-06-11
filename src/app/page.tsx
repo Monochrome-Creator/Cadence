@@ -31,6 +31,7 @@ import {
   Scale,
   Sparkles,
   Sun,
+  SunDim,
   Target,
   Timer,
   TriangleAlert,
@@ -400,6 +401,7 @@ function FocusRow({
   onToggle: () => void;
 }) {
   const updateTask = useProdStore((state) => state.updateTask);
+  const removeTaskFromToday = useProdStore((state) => state.removeTaskFromToday);
   const theme = categoryTheme(task.category);
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
@@ -539,6 +541,19 @@ function FocusRow({
             )}
           >
             <Moon className="size-4" />
+          </button>
+        )}
+
+        {/* Remove from Today — demotes back to the Workspace backlog (isToday=false) */}
+        {!done && (
+          <button
+            type="button"
+            onClick={() => removeTaskFromToday(task.id)}
+            title="Remove from Today — back to Workspace"
+            aria-label="Remove from Today"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+          >
+            <SunDim className="size-4" />
           </button>
         )}
 
@@ -1081,16 +1096,20 @@ export default function HomePage() {
     });
   }, [tasks, activeTaskId]);
 
-  // Split active work from finished work. Inbox tasks are a separate holding
-  // pen (see /inbox) and never surface on the dashboard. Completed tasks leave
-  // "Today's focus" entirely and collect in the "Completed Today" section.
+  // Strict GTD Daily Action list: the dashboard surfaces ONLY tasks the user
+  // explicitly promoted from the Workspace via "Send to Today" (isToday). The
+  // Workspace backlog and the Inbox holding pen never appear here. Completed
+  // today-tasks leave "Today's focus" and collect in the "Completed Today"
+  // section.
   const activeTasks = useMemo(
     () =>
-      rankedTasks.filter((t) => t.status !== "Done" && t.status !== "Inbox"),
+      rankedTasks.filter(
+        (t) => t.isToday && t.status !== "Done" && t.status !== "Inbox"
+      ),
     [rankedTasks]
   );
   const completedTasks = useMemo(
-    () => rankedTasks.filter((t) => t.status === "Done"),
+    () => rankedTasks.filter((t) => t.isToday && t.status === "Done"),
     [rankedTasks]
   );
 
@@ -1266,15 +1285,15 @@ export default function HomePage() {
             null
           ) : completedTasks.length > 0 ? (
             <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-12 text-center text-sm text-[var(--c-dim)]">
-              All caught up — every task is done. ✨
+              All caught up — every task you picked for today is done. ✨
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-12 text-center text-sm text-[var(--c-dim)]">
-              Nothing on the board yet.{" "}
+              No tasks picked for today yet. Open your{" "}
               <Link href="/board" className="font-medium text-[#a35d4d] hover:underline">
-                Add your first task
-              </Link>
-              .
+                Workspace
+              </Link>{" "}
+              and tap the sun to send up to {FOCUS_LIMIT} here.
             </div>
           )}
 

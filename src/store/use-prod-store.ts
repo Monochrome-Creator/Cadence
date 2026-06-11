@@ -125,6 +125,13 @@ export interface Task {
    */
   isEvening?: boolean;
   /**
+   * GTD "Today" promotion flag. A workspace task (status !== "Inbox") with
+   * isToday true is a non-negotiable Daily Action item surfaced on the Dashboard;
+   * false/undefined keeps it in the Workspace master backlog. The number of
+   * *active* (non-Done) today-tasks is capped at {@link MAX_TODAY_TASKS}.
+   */
+  isToday?: boolean;
+  /**
    * The North Star goal this task is contributing toward. Links the day-to-day
    * work on the board to a bigger-picture objective so context is never lost.
    * Undefined for tasks not tied to any goal.
@@ -462,6 +469,32 @@ export function computeHistoryStats(
 export type ConnectionStatus = "synced" | "connecting" | "offline" | "error";
 
 /* -------------------------------------------------------------------------- */
+/*                          GTD "Today" capacity rule                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The GTD capacity constraint: at most this many *active* (non-Done) tasks may
+ * be promoted to the Dashboard's Daily Action list at once. Keeps the day's
+ * commitments to a focused, finishable handful.
+ */
+export const MAX_TODAY_TASKS = 5;
+
+/**
+ * Count of active Daily Action tasks — workspace tasks (not Inbox) flagged
+ * isToday that aren't yet Done. Completed today-tasks don't count against the
+ * cap, so finishing one frees a slot.
+ */
+export function countActiveTodayTasks(tasks: Task[]): number {
+  return tasks.reduce(
+    (count, task) =>
+      task.isToday && task.status !== "Done" && task.status !== "Inbox"
+        ? count + 1
+        : count,
+    0
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                               Pomodoro engine                              */
 /* -------------------------------------------------------------------------- */
 
@@ -535,6 +568,20 @@ interface ProdState {
    * click.
    */
   escalatePriority: (id: string) => void;
+  /**
+   * Promotes a workspace task onto the Dashboard's Daily Action list (isToday).
+   * Enforces the GTD capacity rule: returns false WITHOUT mutating when the
+   * active today-count is already at {@link MAX_TODAY_TASKS}, so the caller can
+   * surface the "capacity reached" toast. Returns true once promoted.
+   */
+  sendTaskToToday: (id: string) => boolean;
+  /** Demotes a Daily Action task back to the Workspace backlog (clears isToday). */
+  removeTaskFromToday: (id: string) => void;
+  /**
+   * Escape hatch: sends a workspace task back to the Inbox holding pen and
+   * clears any Today promotion so it leaves both the board and the dashboard.
+   */
+  returnTaskToInbox: (id: string) => void;
   /**
    * Stops a task from spawning future clones by clearing its recurrence back to
    * "none" — backs the Scheduled Tasks manager's "Cancel Recurrence" button.
@@ -906,6 +953,20 @@ export const useProdStore = create<ProdState>()(
     queueTaskPush(get, [id]);
   },
   escalatePriority: (id) => get().updateTask(id, { priority: "High" }),
+  sendTaskToToday: (id) => {
+    const { tasks } = get();
+    const target = tasks.find((t) => t.id === id);
+    // No-op for unknown or already-promoted tasks (idempotent, frees no slot).
+    if (!target || target.isToday) return true;
+    // Enforce the capacity cap BEFORE mutating, so a blocked promotion leaves
+    // state untouched and the caller can show the "capacity reached" toast.
+    if (countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS) return false;
+    get().updateTask(id, { isToday: true });
+    return true;
+  },
+  removeTaskFromToday: (id) => get().updateTask(id, { isToday: false }),
+  returnTaskToInbox: (id) =>
+    get().updateTask(id, { status: "Inbox", isToday: false }),
   cancelRecurrence: (id) => get().updateTask(id, { recurrence: "none" }),
   updateTaskSessions: (taskId, newSessionCount) => {
     // Clamp to a non-negative integer — sessions can't be fractional or negative.

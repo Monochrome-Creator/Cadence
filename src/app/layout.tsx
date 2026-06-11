@@ -8,6 +8,7 @@ import { DebugPanel } from "@/components/debug-panel";
 import { NotificationManager } from "@/components/notification-manager";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { QuickAddModal } from "@/components/quick-add-modal";
+import { Toaster } from "@/components/toaster";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -76,6 +77,7 @@ export default function RootLayout({
           {children}
         </main>
         <MobileNav />
+        <Toaster />
       </body>
     </html>
   );

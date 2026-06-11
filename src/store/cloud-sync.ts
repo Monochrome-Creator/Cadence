@@ -41,6 +41,8 @@ type TaskRow = {
   progress: number | null;
   /** True for "This Evening" after-hours tasks. */
   is_evening: boolean;
+  /** True for GTD "Today" Daily Action tasks (promoted to the Dashboard). */
+  is_today: boolean;
   /** Four Pillars attribution (Wealth/Health/Career/Personal_IP); null = general. */
   life_pillar: string | null;
 };
@@ -273,6 +275,7 @@ function taskToRow(task: Task, userId: string): TaskRow {
     task_order: task.order,
     progress: task.progress ?? null,
     is_evening: task.isEvening ?? false,
+    is_today: task.isToday ?? false,
     life_pillar: task.lifePillar ?? null,
   };
 }
@@ -308,6 +311,8 @@ function rowToTask(row: TaskRow, subtasks: Subtask[]): Task {
     ...(row.progress != null ? { progress: row.progress } : {}),
     // Tolerate rows synced before the is_evening column existed.
     ...(row.is_evening ? { isEvening: true } : {}),
+    // Tolerate rows synced before the is_today column existed (null/undefined).
+    ...(row.is_today ? { isToday: true } : {}),
     // Tolerate rows synced before the life_pillar column existed (null/undefined).
     ...(row.life_pillar ? { lifePillar: row.life_pillar as LifePillar } : {}),
     subtasks,

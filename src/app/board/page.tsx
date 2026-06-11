@@ -36,6 +36,7 @@ import {
   FolderPlus,
   GripVertical,
   HelpCircle,
+  Inbox,
   ListFilter,
   Minus,
   Pencil,
@@ -43,6 +44,7 @@ import {
   RefreshCw,
   Repeat,
   Sparkles,
+  Sun,
   Tags,
   Target,
   Timer,
@@ -68,6 +70,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "@/store/use-prod-store";
+import { useToastStore } from "@/store/use-toast";
 import { PILLAR_THEME } from "@/lib/life-pillars";
 import { cn } from "@/lib/utils";
 import {
@@ -1009,6 +1012,9 @@ function SortableTaskCard({
   const deleteTask = useProdStore((state) => state.deleteTask);
   const addCategory = useProdStore((state) => state.addCategory);
   const setActiveTask = useProdStore((state) => state.setActiveTask);
+  const sendTaskToToday = useProdStore((state) => state.sendTaskToToday);
+  const returnTaskToInbox = useProdStore((state) => state.returnTaskToInbox);
+  const showToast = useToastStore((state) => state.showToast);
   const completeAndRepeatTask = useProdStore(
     (state) => state.completeAndRepeatTask
   );
@@ -1062,6 +1068,19 @@ function SortableTaskCard({
       updateTask(task.id, {
         status: "Done",
         ...(hasSubtasks ? {} : { progress: 100 }),
+      });
+    }
+  };
+
+  // GTD "Send to Today": promote onto the Dashboard's Daily Action list. The
+  // store enforces the 5-task cap and returns false (without mutating) when it's
+  // full — surface that as the high-visibility red capacity toast.
+  const handleSendToToday = () => {
+    if (!sendTaskToToday(task.id)) {
+      showToast({
+        variant: "error",
+        message:
+          "Capacity reached: Your brain can only handle 5 non-negotiable tasks per day. Finish one first.",
       });
     }
   };
@@ -1327,8 +1346,30 @@ function SortableTaskCard({
           onChange={(next) => updateTaskSessions(task.id, next)}
         />
 
-          {/* Actions: recurrence + delete */}
+          {/* Actions: GTD pipeline (return to inbox / send to today) + recurrence + delete */}
           <div className="ml-auto flex items-center justify-center gap-1 xl:ml-0">
+            {/* Return to Inbox — escape hatch back to the capture holding pen */}
+            <button
+              type="button"
+              title="Return to Inbox"
+              aria-label="Return to Inbox"
+              onClick={() => returnTaskToInbox(task.id)}
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[#e9e6f0] hover:text-[#6a5b88] md:size-8"
+            >
+              <Inbox className="size-4" />
+            </button>
+
+            {/* Send to Today — promote to the Dashboard's Daily Action list */}
+            <button
+              type="button"
+              title="Send to Today"
+              aria-label="Send to Today"
+              onClick={handleSendToToday}
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[#f6e6da] hover:text-[#a35d4d] md:size-8"
+            >
+              <Sun className="size-4" />
+            </button>
+
             {/* Recurrence — subtle loop button; tinted when a repeat is set */}
             <Select
               value={task.recurrence}
@@ -1736,11 +1777,14 @@ export default function BoardPage() {
 
   const visibleTasks = useMemo(() => {
     // Inbox tasks are a separate holding pen (see /inbox) and never appear on
-    // the board until the user promotes them to another status. Done tasks also
+    // the board until the user promotes them to another status. Tasks promoted
+    // to the Dashboard's Daily Action list (isToday) also leave the Workspace
+    // backlog — they live on the dashboard until demoted. Done tasks likewise
     // leave the active groups — they collect in the collapsible "Completed"
     // section at the bottom of the board.
     const boardTasks = tasks.filter(
-      (task) => task.status !== "Inbox" && task.status !== "Done"
+      (task) =>
+        task.status !== "Inbox" && task.status !== "Done" && !task.isToday
     );
     const filtered =
       statusFilter === "all"
