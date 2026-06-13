@@ -60,7 +60,12 @@ export type Recurrence =
 /** Nesting depth of a subtask: L1 (direct child), L2 (grandchild), or L3 (great-grandchild). */
 export type SubtaskLevel = "L1" | "L2" | "L3";
 
-export type SubtaskStatus = "todo" | "done";
+/**
+ * A micro-task is either open ("todo"), completed ("done"), or "cancelled" —
+ * crossed out because it can't / won't be finished. Cancelled rows are treated
+ * as resolved (100%) by the roll-ups so they never drag a card's progress down.
+ */
+export type SubtaskStatus = "todo" | "done" | "cancelled";
 
 export interface Subtask {
   id: string;
@@ -162,6 +167,9 @@ export interface SubtaskRollup {
  * in agreement and both feed the roll-ups identically.
  */
 function leafPercent(subtask: Subtask): number {
+  // A cancelled row is resolved: it counts as fully closed so the card can still
+  // reach 100% without the abandoned step holding it back.
+  if (subtask.status === "cancelled") return 100;
   return Math.max(
     subtask.status === "done" ? 100 : 0,
     clampPercent(subtask.percent ?? 0)
@@ -662,6 +670,12 @@ interface ProdState {
    * 100%; unchecking reopens the whole branch.
    */
   toggleSubtaskComplete: (taskId: string, subtaskId: string) => void;
+  /**
+   * Crosses a micro-task out as "cancelled" (can't / won't finish) and cascades
+   * the state to its descendant block, mirroring {@link toggleSubtaskComplete}.
+   * Toggling an already-cancelled row reopens it back to "todo".
+   */
+  toggleSubtaskCancelled: (taskId: string, subtaskId: string) => void;
   /** Create a new North Star goal. */
   addGoal: (goal: Omit<Goal, "id" | "order">) => void;
   /** Update any fields on an existing goal. */
@@ -1309,6 +1323,48 @@ export const useProdStore = create<ProdState>()(
           ),
         };
         // Completing the last micro-tasks rolls the parent up to Done.
+        const synced = syncStatusToProgress(updated);
+        if (synced.status === "Done" && task.status !== "Done") {
+          becameDone = true;
+          completedPoints = taskPoints(task.priority);
+          completedPillar = task.lifePillar;
+        }
+        return synced;
+      }),
+      history: becameDone
+        ? logTaskCompletion(state.history, completedPoints, completedPillar)
+        : state.history,
+    }));
+    queueTaskPush(get, [taskId]);
+  },
+  toggleSubtaskCancelled: (taskId, subtaskId) => {
+    let becameDone = false;
+    let completedPoints = 0;
+    let completedPillar: LifePillar | undefined;
+    set((state) => ({
+      tasks: state.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        const index = task.subtasks.findIndex((s) => s.id === subtaskId);
+        if (index === -1) return task;
+        // Cross out the row, then apply the same state to its descendant block so
+        // cancelling a parent crosses out everything beneath it.
+        const nextStatus: SubtaskStatus =
+          task.subtasks[index].status === "cancelled" ? "todo" : "cancelled";
+        const targetLevel = SUBTASK_LEVEL_NUM[task.subtasks[index].level];
+        let end = index + 1;
+        while (
+          end < task.subtasks.length &&
+          SUBTASK_LEVEL_NUM[task.subtasks[end].level] > targetLevel
+        ) {
+          end += 1;
+        }
+        const updated: Task = {
+          ...task,
+          subtasks: task.subtasks.map((s, i) =>
+            i >= index && i < end ? { ...s, status: nextStatus } : s
+          ),
+        };
+        // Cancelling the last open micro-tasks resolves the card to Done.
         const synced = syncStatusToProgress(updated);
         if (synced.status === "Done" && task.status !== "Done") {
           becameDone = true;

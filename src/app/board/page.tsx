@@ -27,6 +27,7 @@ import { format, isValid, parseISO } from "date-fns";
 import {
   ArrowDown,
   ArrowUp,
+  Ban,
   CalendarDays,
   Check,
   CalendarPlus,
@@ -181,7 +182,7 @@ const PILL_TRIGGER =
  * falls back to 240px (the original responsive minimum) when unset.
  */
 const GRID_COLS =
-  "xl:grid-cols-[minmax(var(--task-col,290px),1.4fr)_108px_90px_108px_104px_68px_68px]";
+  "xl:grid-cols-[minmax(var(--task-col,290px),1.4fr)_108px_90px_108px_104px_68px_80px]";
 
 /** Drag bounds for the resizable Task column (px). Max stays within max-w-6xl. */
 const TASK_COL_MIN = 260;
@@ -560,6 +561,7 @@ function SortableMicroTask({
   setFocusId,
   updateSubtask,
   toggleComplete,
+  toggleCancelled,
   deleteSubtask,
   insertChild,
 }: {
@@ -570,6 +572,7 @@ function SortableMicroTask({
   setFocusId: (id: string | null) => void;
   updateSubtask: ReturnType<typeof useProdStore.getState>["updateSubtask"];
   toggleComplete: ReturnType<typeof useProdStore.getState>["toggleSubtaskComplete"];
+  toggleCancelled: ReturnType<typeof useProdStore.getState>["toggleSubtaskCancelled"];
   deleteSubtask: ReturnType<typeof useProdStore.getState>["deleteSubtask"];
   insertChild: (subtaskId: string, level: SubtaskLevel) => void;
 }) {
@@ -583,6 +586,7 @@ function SortableMicroTask({
   } = useSortable({ id: subtask.id });
 
   const done = subtask.status === "done";
+  const cancelled = subtask.status === "cancelled";
   const nested = subtask.level !== "L1";
 
   return (
@@ -670,7 +674,9 @@ function SortableMicroTask({
           rows={1}
           className={cn(
             "mt-px min-w-0 flex-1 resize-none rounded border border-transparent bg-transparent px-1 py-1 text-[15px] leading-snug outline-none transition-colors hover:border-[var(--c-line)] focus:border-[#a35d4d] focus:bg-[var(--c-panel)] md:py-0.5 md:text-sm",
-            done ? "text-[var(--c-faint)] line-through" : "text-[var(--c-ink-2)]"
+            done || cancelled
+              ? "text-[var(--c-faint)] line-through"
+              : "text-[var(--c-ink-2)]"
           )}
         />
 
@@ -704,6 +710,29 @@ function SortableMicroTask({
           <Plus className="size-4 md:size-3.5" />
         </button>
 
+        {/* Cross out — mark an unfinishable micro-task as cancelled (kept on the
+            card with a strikethrough) rather than deleting it outright. */}
+        <button
+          type="button"
+          onClick={() => toggleCancelled(taskId, subtask.id)}
+          title={
+            cancelled
+              ? "Reopen this micro-task"
+              : "Can't finish — cross this micro-task out"
+          }
+          aria-label={
+            cancelled ? "Reopen micro-task" : "Cross out micro-task"
+          }
+          className={cn(
+            "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md transition-all focus-visible:opacity-100 md:size-5 md:opacity-0 md:group-hover/sub:opacity-100",
+            cancelled
+              ? "text-[#a35d4d] opacity-100 md:opacity-100"
+              : "text-[var(--c-faint)] opacity-100 hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+          )}
+        >
+          <Ban className="size-4 md:size-3.5" />
+        </button>
+
         {/* Delete — same touch-visible treatment; drops this row and its children. */}
         <button
           type="button"
@@ -728,6 +757,9 @@ function MicroTaskPanel({ task }: { task: Task }) {
   const reorderSubtasks = useProdStore((state) => state.reorderSubtasks);
   const toggleSubtaskComplete = useProdStore(
     (state) => state.toggleSubtaskComplete
+  );
+  const toggleSubtaskCancelled = useProdStore(
+    (state) => state.toggleSubtaskCancelled
   );
 
   // Isolated sensors for the nested micro-task list so dragging a row never
@@ -817,6 +849,7 @@ function MicroTaskPanel({ task }: { task: Task }) {
                   setFocusId={setFocusId}
                   updateSubtask={updateSubtask}
                   toggleComplete={toggleSubtaskComplete}
+                  toggleCancelled={toggleSubtaskCancelled}
                   deleteSubtask={deleteSubtask}
                   insertChild={insertChild}
                 />
@@ -1101,7 +1134,9 @@ function SortableTaskCard({
     transition,
   };
 
-  const doneCount = task.subtasks.filter((s) => s.status === "done").length;
+  const doneCount = task.subtasks.filter(
+    (s) => s.status === "done" || s.status === "cancelled"
+  ).length;
   // Overall completion: Done → 100, else the L1 roll-up, else the manual %.
   const progress = effectiveTaskProgress(task);
   // Fraction badge: completed L3 action tasks over total L3s. Falls back to the
@@ -1346,8 +1381,10 @@ function SortableTaskCard({
           onChange={(next) => updateTaskSessions(task.id, next)}
         />
 
-          {/* Actions: GTD pipeline (return to inbox / send to today) + recurrence + delete */}
-          <div className="ml-auto flex items-center justify-center gap-1 xl:ml-0">
+          {/* Actions: GTD pipeline (return to inbox / send to today) + recurrence + delete.
+              flex-wrap lets the four controls fall onto a second row inside the
+              narrow Actions column instead of overflowing the card. */}
+          <div className="ml-auto flex flex-wrap items-center justify-center gap-1 xl:ml-0">
             {/* Return to Inbox — escape hatch back to the capture holding pen */}
             <button
               type="button"
@@ -1459,7 +1496,9 @@ function SortableTaskCard({
 /* -------------------------------------------------------------------------- */
 
 function TaskDragOverlayCard({ task }: { task: Task }) {
-  const doneCount = task.subtasks.filter((s) => s.status === "done").length;
+  const doneCount = task.subtasks.filter(
+    (s) => s.status === "done" || s.status === "cancelled"
+  ).length;
   const l3 = computeL3Fraction(task.subtasks);
   const fractionDone = l3.total > 0 ? l3.done : doneCount;
   const fractionTotal = l3.total > 0 ? l3.total : task.subtasks.length;

@@ -409,7 +409,9 @@ function FocusRow({
   const subDone =
     l3.total > 0
       ? l3.done
-      : task.subtasks.filter((s) => s.status === "done").length;
+      : task.subtasks.filter(
+          (s) => s.status === "done" || s.status === "cancelled"
+        ).length;
   const subTotal = l3.total > 0 ? l3.total : task.subtasks.length;
   const category = task.category.trim() || "General";
 
