@@ -39,7 +39,6 @@ import {
 
 import {
   computeHistoryStats,
-  computeL3Fraction,
   DAILY_GOAL_POINTS,
   TASK_POINTS,
   useProdStore,
@@ -405,14 +404,10 @@ function FocusRow({
   const theme = categoryTheme(task.category);
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
-  const l3 = computeL3Fraction(task.subtasks);
-  const subDone =
-    l3.total > 0
-      ? l3.done
-      : task.subtasks.filter(
-          (s) => s.status === "done" || s.status === "cancelled"
-        ).length;
-  const subTotal = l3.total > 0 ? l3.total : task.subtasks.length;
+  const subDone = task.subtasks.filter(
+    (s) => s.status === "done" || s.status === "cancelled"
+  ).length;
+  const subTotal = task.subtasks.length;
   const category = task.category.trim() || "General";
 
   return (

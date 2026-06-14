@@ -57,7 +57,6 @@ import {
   LIFE_PILLARS,
   TASK_STATUSES,
   clampPercent,
-  computeL3Fraction,
   computeSubtaskRollups,
   effectiveTaskProgress,
   useProdStore,
@@ -282,31 +281,56 @@ function DeadlineField({
   onChange: (next: string) => void;
 }) {
   const iso = toDateInputValue(value);
+  const display = formatCompactDeadline(value);
 
   return (
-    <div className="flex w-full items-center gap-2">
-      <label className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-3 py-2 text-[var(--c-ink-3)] transition-colors focus-within:border-[#a35d4d] focus-within:ring-2 focus-within:ring-[#a35d4d]/15 md:min-h-0 md:rounded-md md:border-transparent md:bg-transparent md:px-2 md:py-1.5">
+    <div className="relative flex min-h-11 w-full items-center rounded-lg border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-3 transition-colors focus-within:border-[#a35d4d] focus-within:ring-2 focus-within:ring-[#a35d4d]/15 md:min-h-0 md:rounded-md md:border-transparent md:bg-transparent md:px-2">
+      {/* Visible face: icon + the formatted date (or a placeholder). Rendering
+          the date as plain text — rather than letting the native input draw it —
+          keeps it readable even in the narrow grid column where the wide native
+          date chrome would clip. pointer-events-none lets taps fall through to
+          the invisible input behind it. */}
+      <span
+        className={cn(
+          "pointer-events-none flex min-w-0 flex-1 items-center gap-2 py-2 md:py-1.5",
+          iso ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
+        )}
+      >
         <CalendarDays className="size-4 shrink-0 text-[var(--c-faint)] md:size-3.5" />
-        <span className="sr-only">Pick a deadline</span>
-        <input
-          type="date"
-          value={iso}
-          onChange={(e) => onChange(e.target.value)}
-          aria-label="Pick a deadline"
-          className={cn(
-            "min-h-9 min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-[16px] font-medium outline-none [color-scheme:light] dark:[color-scheme:dark] md:min-h-0 md:text-sm",
-            iso ? "text-[var(--c-ink-3)]" : "text-[var(--c-faint)]"
-          )}
-        />
-      </label>
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium md:text-sm">
+          {display || "Add date"}
+        </span>
+      </span>
+
+      {/* Invisible native date input — covers the face (minus the Clear slot when
+          a date is set) so a tap opens the OS picker. */}
+      <input
+        type="date"
+        value={iso}
+        onChange={(e) => onChange(e.target.value)}
+        onClick={(e) => {
+          try {
+            e.currentTarget.showPicker?.();
+          } catch {
+            // Native focus already opens the picker where showPicker is unsupported.
+          }
+        }}
+        aria-label="Pick a deadline"
+        className={cn(
+          "absolute inset-y-0 left-0 cursor-pointer opacity-0",
+          iso ? "right-8" : "right-0"
+        )}
+      />
+
       {iso && (
         <button
           type="button"
           onClick={() => onChange("")}
           aria-label="Clear deadline"
-          className="shrink-0 rounded-full px-2 py-1 text-xs font-medium text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+          title="Clear deadline"
+          className="relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
         >
-          Clear
+          <X className="size-3.5" />
         </button>
       )}
     </div>
@@ -1137,13 +1161,13 @@ function SortableTaskCard({
   const doneCount = task.subtasks.filter(
     (s) => s.status === "done" || s.status === "cancelled"
   ).length;
-  // Overall completion: Done → 100, else the L1 roll-up, else the manual %.
+  // Overall completion: Done → 100, else the flat average of every micro-task,
+  // else the manual %.
   const progress = effectiveTaskProgress(task);
-  // Fraction badge: completed L3 action tasks over total L3s. Falls back to the
-  // plain done/total of all micro-tasks when the card has no L3s yet.
-  const l3 = computeL3Fraction(task.subtasks);
-  const fractionDone = l3.total > 0 ? l3.done : doneCount;
-  const fractionTotal = l3.total > 0 ? l3.total : task.subtasks.length;
+  // Fraction badge: completed (or cancelled) micro-tasks over the total, so it
+  // tracks the same per-step model as the progress bar.
+  const fractionDone = doneCount;
+  const fractionTotal = task.subtasks.length;
   // Color-codes the whole card by category for at-a-glance grouping.
   const theme = categoryTheme(task.category);
 
@@ -1499,9 +1523,8 @@ function TaskDragOverlayCard({ task }: { task: Task }) {
   const doneCount = task.subtasks.filter(
     (s) => s.status === "done" || s.status === "cancelled"
   ).length;
-  const l3 = computeL3Fraction(task.subtasks);
-  const fractionDone = l3.total > 0 ? l3.done : doneCount;
-  const fractionTotal = l3.total > 0 ? l3.total : task.subtasks.length;
+  const fractionDone = doneCount;
+  const fractionTotal = task.subtasks.length;
   const deadline = formatDeadline(task.deadline);
   const theme = categoryTheme(task.category);
 

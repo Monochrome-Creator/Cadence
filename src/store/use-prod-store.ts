@@ -192,12 +192,13 @@ function leafPercent(subtask: Subtask): number {
 }
 
 /**
- * Derive each micro-task's completion percent from the flat, outline-ordered
- * subtask list. A row's direct children are the contiguous following rows
- * exactly one level deeper (until a row at the same or shallower level closes
- * the block). Leaf rows use their own stored `percent`; parents average their
- * direct children (recursively). This is the L1/L2/L3 roll-up where an L2
- * aggregates its L3s and an L1 aggregates its L2s.
+ * Per-row completion for the micro-task list. Each micro-task is its own unit of
+ * work: a row's percent reflects only its own state (a checked or cancelled row
+ * is 100%, otherwise its manually-set percent) — it is NOT a roll-up of its
+ * children. Parent rows (those with deeper rows beneath them) aren't directly
+ * editable; you complete them with their own checkbox. Keeping L1/L2/L3 as
+ * independent steps means finishing a deep L3 doesn't mark its ancestors — or
+ * the whole task — complete.
  */
 export function computeSubtaskRollups(
   subtasks: Subtask[]
@@ -205,53 +206,34 @@ export function computeSubtaskRollups(
   const n = subtasks.length;
   const level = subtasks.map((s) => SUBTASK_LEVEL_NUM[s.level]);
 
-  const directChildren = (i: number): number[] => {
-    const out: number[] = [];
+  const hasChildren = (i: number): boolean => {
     for (let j = i + 1; j < n; j++) {
       if (level[j] <= level[i]) break; // block closed by a same/shallower row
-      if (level[j] === level[i] + 1) out.push(j);
+      if (level[j] === level[i] + 1) return true;
     }
-    return out;
-  };
-
-  const memo = new Array<number | null>(n).fill(null);
-  const value = (i: number): number => {
-    const cached = memo[i];
-    if (cached !== null) return cached;
-    const kids = directChildren(i);
-    const result =
-      kids.length === 0
-        ? leafPercent(subtasks[i])
-        : Math.round(kids.reduce((sum, j) => sum + value(j), 0) / kids.length);
-    memo[i] = result;
-    return result;
+    return false;
   };
 
   const out: Record<string, SubtaskRollup> = {};
   for (let i = 0; i < n; i++) {
     out[subtasks[i].id] = {
-      percent: value(i),
-      editable: directChildren(i).length === 0,
+      percent: leafPercent(subtasks[i]),
+      editable: !hasChildren(i),
     };
   }
   return out;
 }
 
 /**
- * Overall task completion: the average of its shallowest-level micro-tasks
- * (the L1s when present), each already rolled up from its descendants. Returns
+ * Overall task completion: the average of every micro-task's own percent, so
+ * each L1/L2/L3 counts equally. Completing a single deep micro-task therefore
+ * nudges the bar by one unit instead of jumping the whole task to 100%. Returns
  * 0 when the task has no micro-tasks.
  */
 export function computeTaskProgress(subtasks: Subtask[]): number {
   if (subtasks.length === 0) return 0;
-  const rollups = computeSubtaskRollups(subtasks);
-  const minLevel = Math.min(...subtasks.map((s) => SUBTASK_LEVEL_NUM[s.level]));
-  const roots = subtasks.filter(
-    (s) => SUBTASK_LEVEL_NUM[s.level] === minLevel
-  );
-  return Math.round(
-    roots.reduce((sum, s) => sum + rollups[s.id].percent, 0) / roots.length
-  );
+  const total = subtasks.reduce((sum, s) => sum + leafPercent(s), 0);
+  return Math.round(total / subtasks.length);
 }
 
 /**
@@ -265,21 +247,6 @@ export function effectiveTaskProgress(task: Task): number {
   if (task.status === "Done") return 100;
   if (task.subtasks.length > 0) return computeTaskProgress(task.subtasks);
   return clampPercent(task.progress ?? 0);
-}
-
-/**
- * Card fraction badge data: how many L3 action tasks are fully complete out of
- * the total number of L3 tasks. A leaf is "complete" at 100% (which includes a
- * checked-off row). Returns { done: 0, total: 0 } when the task has no L3s — the
- * caller decides what to show in that case.
- */
-export function computeL3Fraction(subtasks: Subtask[]): {
-  done: number;
-  total: number;
-} {
-  const l3 = subtasks.filter((s) => s.level === "L3");
-  const done = l3.filter((s) => leafPercent(s) >= 100).length;
-  return { done, total: l3.length };
 }
 
 /**
@@ -368,13 +335,6 @@ export const DAILY_GOAL_POINTS = 10;
 /*                          Daily Plan (auto-planner)                         */
 /* -------------------------------------------------------------------------- */
 
-/**
- * How many "main" tasks the auto-planner commits to per day. Deliberately tiny
- * (1–2) so the day feels achievable rather than overwhelming — everything else
- * is surfaced as optional backlog, not required work.
- */
-export const MAIN_PLAN_LIMIT = 2;
-
 /** Today as a local yyyy-MM-dd string (date-only, for plan/period comparisons). */
 export function todayKey(date: Date = new Date()): string {
   return format(date, "yyyy-MM-dd");
@@ -384,7 +344,12 @@ export function todayKey(date: Date = new Date()): string {
 export interface DailyPlan {
   /** yyyy-MM-dd this plan was generated for. */
   date: string;
-  /** The 1–2 auto-suggested main tasks for the day, in priority order. */
+  /**
+   * Snapshot of the workspace focus tasks (isToday) captured when this day's
+   * plan was built. Not rendered directly — the focus list reads the live
+   * isToday flag — but kept so the next-day rollover can detect which focus
+   * tasks went unfinished and surface them in the review.
+   */
   mainTaskIds: string[];
   /**
    * Tasks the user hand-picked for today via the "Focus" button — a separate,
@@ -402,87 +367,38 @@ export interface PendingReview {
   taskIds: string[];
 }
 
-/** Lower rank = more important, mirroring the dashboard's priority ordering. */
-const PLAN_PRIORITY_RANK: Record<TaskPriority, number> = {
-  Critical: 0,
-  High: 1,
-  Medium: 2,
-  Low: 3,
-};
-
-/** A task is plannable when it's actionable — not finished and not still in the Inbox. */
-function isPlannable(task: Task): boolean {
-  return task.status !== "Done" && task.status !== "Inbox";
-}
-
 /**
- * Bucket a task for the daily plan. Lower bucket = picked first, exactly matching
- * the requested priority order:
- *   0 overdue → 1 due today → 2 recurring work → 3 lower-priority backlog.
- */
-function planBucket(task: Task, today: string): number {
-  const iso = task.deadline?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
-  if (iso && iso < today) return 0; // overdue
-  if (iso && iso === today) return 1; // due today
-  if (task.recurrence !== "none") return 2; // recurring work micro-task
-  return 3; // backlog
-}
-
-/**
- * Rank all actionable tasks for the day in the planner's preference order
- * (bucket → priority → manual order). Pure: callers slice the head for "main"
- * work and keep the tail as optional backlog.
- */
-export function rankTasksForPlan(tasks: Task[], today: string = todayKey()): Task[] {
-  return tasks
-    .filter(isPlannable)
-    .sort((a, b) => {
-      const bucket = planBucket(a, today) - planBucket(b, today);
-      if (bucket !== 0) return bucket;
-      const prio = PLAN_PRIORITY_RANK[a.priority] - PLAN_PRIORITY_RANK[b.priority];
-      if (prio !== 0) return prio;
-      return a.order - b.order;
-    });
-}
-
-/**
- * A day's plan split for rendering: auto-suggested `main` tasks, the user's
- * hand-picked `manual` focus tasks, and the `optional` backlog remainder.
+ * A day's plan split for rendering: the `main` focus list (driven entirely by
+ * the workspace "Send to Today" / isToday mark) and the user's hand-picked
+ * `manual` focus tasks pulled forward from a missed day.
  */
 export interface DailyPlanView {
   main: Task[];
   manual: Task[];
-  optional: Task[];
 }
 
 /**
- * Resolve a stored {@link DailyPlan} against the live task list for rendering.
- * `main` follows the auto-suggested IDs; `manual` follows the user's Focus
- * picks (excluding any that are also auto-suggested, so a task never shows
- * twice); `optional` is every other actionable task in planner order. Done
- * tasks stay in their list so the user sees the win. Empty split when no plan.
+ * Resolve the Daily Plan for rendering. There is no auto-ranking: `main` is
+ * exactly the tasks the user marked as focus in the Workspace (isToday), in
+ * board order. `manual` follows the user's review "Today" picks, excluding any
+ * already in `main` so a task never shows twice. Done tasks stay in their list
+ * so the user still sees the win.
  */
 export function resolveDailyPlan(
   plan: DailyPlan | null,
-  tasks: Task[],
-  today: string = todayKey()
+  tasks: Task[]
 ): DailyPlanView {
-  if (!plan) return { main: [], manual: [], optional: [] };
-  const mainIds = new Set(plan.mainTaskIds);
-  const manualIds = (plan.manualTaskIds ?? []).filter((id) => !mainIds.has(id));
-  const manualSet = new Set(manualIds);
+  const main = tasks
+    .filter((t) => t.isToday)
+    .sort((a, b) => a.order - b.order);
+  if (!plan) return { main, manual: [] };
+  const mainIds = new Set(main.map((t) => t.id));
   const byId = new Map(tasks.map((t) => [t.id, t] as const));
-  // Preserve the committed order; drop IDs whose task was deleted.
-  const main = plan.mainTaskIds
+  const manual = (plan.manualTaskIds ?? [])
+    .filter((id) => !mainIds.has(id))
     .map((id) => byId.get(id))
     .filter((t): t is Task => t != null);
-  const manual = manualIds
-    .map((id) => byId.get(id))
-    .filter((t): t is Task => t != null);
-  const optional = rankTasksForPlan(tasks, today).filter(
-    (t) => !mainIds.has(t.id) && !manualSet.has(t.id)
-  );
-  return { main, manual, optional };
+  return { main, manual };
 }
 
 /** A day's earned effort points (tolerating legacy days with no `points`). */
@@ -775,8 +691,6 @@ interface ProdState {
    * unfinished main tasks into {@link pendingReview} (once). Idempotent.
    */
   ensureDailyPlan: () => void;
-  /** Force a fresh auto-plan for today (the Daily Plan "Re-plan" affordance). */
-  regenerateDailyPlan: () => void;
   /** Dismiss the missed-task review without further action ("Skip for now"). */
   dismissReview: () => void;
   /** Hand-pick a task into today's manual focus list (the "Focus" button). */
@@ -1411,33 +1325,14 @@ export const useProdStore = create<ProdState>()(
       }
     }
 
-    const main = rankTasksForPlan(tasks, today)
-      .slice(0, MAIN_PLAN_LIMIT)
-      .map((t) => t.id);
-
-    // A fresh day starts with an empty manual focus list.
+    // Snapshot the current workspace focus marks so tomorrow's rollover can
+    // tell which of today's focus tasks went unfinished. A fresh day starts
+    // with an empty manual focus list.
+    const focusSnapshot = tasks.filter((t) => t.isToday).map((t) => t.id);
     set({
-      dailyPlan: { date: today, mainTaskIds: main, manualTaskIds: [] },
+      dailyPlan: { date: today, mainTaskIds: focusSnapshot, manualTaskIds: [] },
       pendingReview: nextReview,
     });
-    pushDailyPlanIfCloud(get);
-  },
-  regenerateDailyPlan: () => {
-    const today = todayKey();
-    const main = rankTasksForPlan(get().tasks, today)
-      .slice(0, MAIN_PLAN_LIMIT)
-      .map((t) => t.id);
-    set((state) => ({
-      // Reset only the auto-suggested picks; keep the user's manual focus list.
-      dailyPlan: {
-        date: today,
-        mainTaskIds: main,
-        manualTaskIds:
-          state.dailyPlan?.date === today
-            ? (state.dailyPlan.manualTaskIds ?? [])
-            : [],
-      },
-    }));
     pushDailyPlanIfCloud(get);
   },
   dismissReview: () => {
@@ -1468,6 +1363,9 @@ export const useProdStore = create<ProdState>()(
     pushDailyPlanIfCloud(get);
   },
   planRemoveFromToday: (taskId) => {
+    // The focus list mirrors the workspace isToday mark, so removing a focus
+    // task means clearing that mark; also drop it from the manual list.
+    get().updateTask(taskId, { isToday: false });
     set((state) => {
       const today = todayKey();
       const plan = state.dailyPlan ?? {

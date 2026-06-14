@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { format, isValid, parseISO } from "date-fns";
 import {
@@ -8,11 +8,7 @@ import {
   CalendarDays,
   Check,
   CheckCheck,
-  ChevronDown,
-  ChevronUp,
   ListTodo,
-  Plus,
-  RefreshCw,
   Repeat,
   Sun,
   X,
@@ -64,16 +60,12 @@ function PlanCard({
   task,
   today,
   onComplete,
-  variant,
-  onPromote,
   onRemove,
 }: {
   task: Task;
   today: string;
   onComplete: (id: string) => void;
-  variant: "main" | "optional";
-  onPromote?: (id: string) => void;
-  onRemove?: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
@@ -82,10 +74,7 @@ function PlanCard({
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-2xl border p-4 transition-all",
-        variant === "main"
-          ? "border-[var(--c-line)] bg-[var(--c-panel)] shadow-[0_1px_4px_rgba(74,64,54,0.05)]"
-          : "border-[var(--c-line)] bg-[var(--c-panel-soft)]",
+        "flex items-center gap-3 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)] transition-all",
         done && "opacity-55"
       )}
     >
@@ -149,19 +138,7 @@ function PlanCard({
         </div>
       </div>
 
-      {variant === "optional" && onPromote && !done && (
-        <button
-          type="button"
-          onClick={() => onPromote(task.id)}
-          title="Add to today's focus"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel)] px-3 py-1.5 text-[12px] font-medium text-[#a35d4d] transition-colors hover:border-[#e7c4c4] hover:bg-[#fcf4ef]"
-        >
-          <Plus className="size-3.5" />
-          Focus
-        </button>
-      )}
-
-      {variant === "main" && onRemove && !done && (
+      {!done && (
         <button
           type="button"
           onClick={() => onRemove(task.id)}
@@ -180,13 +157,10 @@ export default function CalendarPage() {
   const tasks = useProdStore((state) => state.tasks);
   const dailyPlan = useProdStore((state) => state.dailyPlan);
   const ensureDailyPlan = useProdStore((state) => state.ensureDailyPlan);
-  const regenerateDailyPlan = useProdStore((state) => state.regenerateDailyPlan);
   const planCompleteTask = useProdStore((state) => state.planCompleteTask);
-  const planMoveToToday = useProdStore((state) => state.planMoveToToday);
   const planRemoveFromToday = useProdStore((state) => state.planRemoveFromToday);
   const clearManualFocus = useProdStore((state) => state.clearManualFocus);
 
-  const [showOptional, setShowOptional] = useState(true);
   const today = todayKey();
 
   // Make sure a plan exists for today (handles first visit / day rollover).
@@ -194,9 +168,9 @@ export default function CalendarPage() {
     ensureDailyPlan();
   }, [ensureDailyPlan]);
 
-  const { main, manual, optional } = useMemo(
-    () => resolveDailyPlan(dailyPlan, tasks, today),
-    [dailyPlan, tasks, today]
+  const { main, manual } = useMemo(
+    () => resolveDailyPlan(dailyPlan, tasks),
+    [dailyPlan, tasks]
   );
 
   const mainDone = main.filter((t) => t.status === "Done").length;
@@ -208,7 +182,7 @@ export default function CalendarPage() {
   return (
     <div className="px-5 py-7 md:px-8 md:py-10">
       <div className="mx-auto flex max-w-3xl flex-col gap-6 md:gap-7">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <header className="flex flex-col gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-[13.5px] font-medium text-[var(--c-dim)]">
               <CalendarDays className="size-4 text-[#a35d4d]" />
@@ -218,24 +192,19 @@ export default function CalendarPage() {
               Daily Plan
             </h1>
             <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[var(--c-ink-3)]">
-              A calm, realistic focus for today — one or two suggested tasks, plus
-              a <span className="font-medium text-[#a35d4d]">Manual focus</span> list
-              you build with the <span className="font-medium text-[#a35d4d]">Focus</span>{" "}
-              button and clear off when you&rsquo;re done.
+              Your focus for today is whatever you mark on the{" "}
+              <Link href="/board" className="font-medium text-[#a35d4d] hover:underline">
+                Workspace
+              </Link>{" "}
+              with{" "}
+              <span className="font-medium text-[#a35d4d]">Send to Today</span>.
+              Nothing shows here until you choose it — so the list stays exactly as
+              long as you want it.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={regenerateDailyPlan}
-            title="Reset today's focus to the auto-suggested top priorities"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--c-ink-3)] transition-colors hover:border-[#e7c4c4] hover:bg-[#fcf4ef] hover:text-[#a35d4d]"
-          >
-            <RefreshCw className="size-3.5" />
-            Reset to suggested
-          </button>
         </header>
 
-        {/* Today's focus */}
+        {/* Today's focus — driven by the Workspace "Send to Today" mark */}
         <section className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
@@ -258,7 +227,6 @@ export default function CalendarPage() {
                   today={today}
                   onComplete={planCompleteTask}
                   onRemove={planRemoveFromToday}
-                  variant="main"
                 />
               ))}
               {allMainDone && (
@@ -269,16 +237,17 @@ export default function CalendarPage() {
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-10 text-center text-sm text-[var(--c-dim)]">
-              Nothing needs your focus today. Add tasks on the{" "}
+              No focus tasks yet. Open the{" "}
               <Link href="/board" className="font-medium text-[#a35d4d] hover:underline">
-                board
+                Workspace
               </Link>{" "}
-              and they&rsquo;ll be planned for you.
+              and hit <span className="font-medium text-[#a35d4d]">Send to Today</span>{" "}
+              on the tasks you want to focus on.
             </div>
           )}
         </section>
 
-        {/* Manual focus — tasks the user hand-picked with "Focus" */}
+        {/* Manual focus — tasks pulled forward from a missed day */}
         {manual.length > 0 && (
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
@@ -309,7 +278,6 @@ export default function CalendarPage() {
                   today={today}
                   onComplete={planCompleteTask}
                   onRemove={planRemoveFromToday}
-                  variant="main"
                 />
               ))}
               {manualOpen === 0 && (
@@ -318,56 +286,6 @@ export default function CalendarPage() {
                 </p>
               )}
             </div>
-          </section>
-        )}
-
-        {/* Optional / backlog */}
-        {optional.length > 0 && (
-          <section className="flex flex-col gap-3">
-            <button
-              type="button"
-              onClick={() => setShowOptional((v) => !v)}
-              className="flex items-center justify-between rounded-2xl px-1 py-1 text-left"
-            >
-              <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
-                Optional &middot; Backlog
-                <span className="rounded-full bg-[var(--c-beige-2)] px-2 py-0.5 text-[11px] tabular-nums text-[var(--c-dim)]">
-                  {optional.length}
-                </span>
-              </h2>
-              {showOptional ? (
-                <ChevronUp className="size-4 text-[var(--c-dim)]" />
-              ) : (
-                <ChevronDown className="size-4 text-[var(--c-dim)]" />
-              )}
-            </button>
-
-            {showOptional ? (
-              <div className="flex flex-col gap-2.5">
-                {optional.map((task) => (
-                  <PlanCard
-                    key={task.id}
-                    task={task}
-                    today={today}
-                    onComplete={planCompleteTask}
-                    onPromote={planMoveToToday}
-                    variant="optional"
-                  />
-                ))}
-              </div>
-            ) : (
-              <p className="px-1 text-[13.5px] text-[var(--c-dim)]">
-                {optional.length} more task{optional.length === 1 ? "" : "s"} waiting
-                — not required today.{" "}
-                <button
-                  type="button"
-                  onClick={() => setShowOptional(true)}
-                  className="font-medium text-[#a35d4d] hover:underline"
-                >
-                  Show them
-                </button>
-              </p>
-            )}
           </section>
         )}
 
