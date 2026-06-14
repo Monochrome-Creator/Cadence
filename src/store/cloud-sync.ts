@@ -625,7 +625,11 @@ export async function pushCategories(categories: string[]): Promise<void> {
 
 /** Shape persisted in `users.daily_plan` (jsonb) — the auto-plan + missed review. */
 export type DailyPlanSync = {
-  plan: { date: string; mainTaskIds: string[] } | null;
+  plan: {
+    date: string;
+    mainTaskIds: string[];
+    manualTaskIds?: string[];
+  } | null;
   review: { date: string; taskIds: string[] } | null;
 };
 

@@ -7,8 +7,10 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  CheckCheck,
   ChevronDown,
   ChevronUp,
+  ListTodo,
   Plus,
   RefreshCw,
   Repeat,
@@ -182,6 +184,7 @@ export default function CalendarPage() {
   const planCompleteTask = useProdStore((state) => state.planCompleteTask);
   const planMoveToToday = useProdStore((state) => state.planMoveToToday);
   const planRemoveFromToday = useProdStore((state) => state.planRemoveFromToday);
+  const clearManualFocus = useProdStore((state) => state.clearManualFocus);
 
   const [showOptional, setShowOptional] = useState(true);
   const today = todayKey();
@@ -191,13 +194,15 @@ export default function CalendarPage() {
     ensureDailyPlan();
   }, [ensureDailyPlan]);
 
-  const { main, optional } = useMemo(
+  const { main, manual, optional } = useMemo(
     () => resolveDailyPlan(dailyPlan, tasks, today),
     [dailyPlan, tasks, today]
   );
 
   const mainDone = main.filter((t) => t.status === "Done").length;
   const allMainDone = main.length > 0 && mainDone === main.length;
+  const manualDone = manual.filter((t) => t.status === "Done").length;
+  const manualOpen = manual.length - manualDone;
   const prettyDate = format(new Date(), "EEEE, d MMMM");
 
   return (
@@ -213,9 +218,10 @@ export default function CalendarPage() {
               Daily Plan
             </h1>
             <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[var(--c-ink-3)]">
-              A calm, realistic focus for today — just one or two things that
-              matter most. Swap any of them: remove with the ✕, or add a backlog
-              item below with <span className="font-medium text-[#a35d4d]">Focus</span>.
+              A calm, realistic focus for today — one or two suggested tasks, plus
+              a <span className="font-medium text-[#a35d4d]">Manual focus</span> list
+              you build with the <span className="font-medium text-[#a35d4d]">Focus</span>{" "}
+              button and clear off when you&rsquo;re done.
             </p>
           </div>
           <button
@@ -271,6 +277,49 @@ export default function CalendarPage() {
             </div>
           )}
         </section>
+
+        {/* Manual focus — tasks the user hand-picked with "Focus" */}
+        {manual.length > 0 && (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
+                <ListTodo className="size-4 text-[#a35d4d]" />
+                Manual focus
+                <span className="rounded-full bg-[var(--c-beige-2)] px-2 py-0.5 text-[11px] tabular-nums text-[var(--c-dim)]">
+                  {manualDone}/{manual.length}
+                </span>
+              </h2>
+              {manualOpen > 0 && (
+                <button
+                  type="button"
+                  onClick={clearManualFocus}
+                  title="Mark every manual-focus task done for the day"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-3 py-1.5 text-[12px] font-medium text-[#5f6b4a] transition-colors hover:border-[#cdd6bd] hover:bg-[#eef0e7]"
+                >
+                  <CheckCheck className="size-3.5" />
+                  Clear for the day
+                </button>
+              )}
+            </div>
+            <div className="flex flex-col gap-2.5">
+              {manual.map((task) => (
+                <PlanCard
+                  key={task.id}
+                  task={task}
+                  today={today}
+                  onComplete={planCompleteTask}
+                  onRemove={planRemoveFromToday}
+                  variant="main"
+                />
+              ))}
+              {manualOpen === 0 && (
+                <p className="px-1 pt-1 text-[13.5px] text-[#5f6b4a]">
+                  Manual focus cleared. Nice work.
+                </p>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* Optional / backlog */}
         {optional.length > 0 && (

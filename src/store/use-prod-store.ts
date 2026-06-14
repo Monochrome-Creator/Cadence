@@ -384,8 +384,14 @@ export function todayKey(date: Date = new Date()): string {
 export interface DailyPlan {
   /** yyyy-MM-dd this plan was generated for. */
   date: string;
-  /** The 1–2 main tasks committed to for the day, in priority order. */
+  /** The 1–2 auto-suggested main tasks for the day, in priority order. */
   mainTaskIds: string[];
+  /**
+   * Tasks the user hand-picked for today via the "Focus" button — a separate,
+   * self-curated focus list they clear as the day's manual work. Optional so
+   * plans synced before this field round-trip cleanly.
+   */
+  manualTaskIds?: string[];
 }
 
 /** A pending "you missed these" review surfaced on the next app open. */
@@ -439,32 +445,44 @@ export function rankTasksForPlan(tasks: Task[], today: string = todayKey()): Tas
     });
 }
 
-/** A day's auto-plan split into the committed `main` tasks and the `optional` rest. */
+/**
+ * A day's plan split for rendering: auto-suggested `main` tasks, the user's
+ * hand-picked `manual` focus tasks, and the `optional` backlog remainder.
+ */
 export interface DailyPlanView {
   main: Task[];
+  manual: Task[];
   optional: Task[];
 }
 
 /**
  * Resolve a stored {@link DailyPlan} against the live task list for rendering.
- * `main` follows the IDs the plan committed to (kept stable through the day, and
- * still shown once completed so the user sees their win); `optional` is every
- * other actionable task in planner order. Returns an empty split when no plan.
+ * `main` follows the auto-suggested IDs; `manual` follows the user's Focus
+ * picks (excluding any that are also auto-suggested, so a task never shows
+ * twice); `optional` is every other actionable task in planner order. Done
+ * tasks stay in their list so the user sees the win. Empty split when no plan.
  */
 export function resolveDailyPlan(
   plan: DailyPlan | null,
   tasks: Task[],
   today: string = todayKey()
 ): DailyPlanView {
-  if (!plan) return { main: [], optional: [] };
+  if (!plan) return { main: [], manual: [], optional: [] };
   const mainIds = new Set(plan.mainTaskIds);
+  const manualIds = (plan.manualTaskIds ?? []).filter((id) => !mainIds.has(id));
+  const manualSet = new Set(manualIds);
   const byId = new Map(tasks.map((t) => [t.id, t] as const));
   // Preserve the committed order; drop IDs whose task was deleted.
   const main = plan.mainTaskIds
     .map((id) => byId.get(id))
     .filter((t): t is Task => t != null);
-  const optional = rankTasksForPlan(tasks, today).filter((t) => !mainIds.has(t.id));
-  return { main, optional };
+  const manual = manualIds
+    .map((id) => byId.get(id))
+    .filter((t): t is Task => t != null);
+  const optional = rankTasksForPlan(tasks, today).filter(
+    (t) => !mainIds.has(t.id) && !manualSet.has(t.id)
+  );
+  return { main, manual, optional };
 }
 
 /** A day's earned effort points (tolerating legacy days with no `points`). */
@@ -761,10 +779,12 @@ interface ProdState {
   regenerateDailyPlan: () => void;
   /** Dismiss the missed-task review without further action ("Skip for now"). */
   dismissReview: () => void;
-  /** Add a task to today's plan as a main focus item (manual override). */
+  /** Hand-pick a task into today's manual focus list (the "Focus" button). */
   planMoveToToday: (taskId: string) => void;
-  /** Remove a task from today's main focus, demoting it back to the backlog. */
+  /** Remove a task from today's focus (auto or manual), back to the backlog. */
   planRemoveFromToday: (taskId: string) => void;
+  /** Mark every manual-focus task done — the "Clear for the day" affordance. */
+  clearManualFocus: () => void;
   /** Complete a reviewed missed task in place, then drop it from the review. */
   planCompleteTask: (taskId: string) => void;
   addSubtask: (taskId: string, title: string, level: SubtaskLevel) => void;
@@ -1370,12 +1390,19 @@ export const useProdStore = create<ProdState>()(
     // Already planned for today — nothing to roll over.
     if (dailyPlan && dailyPlan.date === today) return;
 
-    // Rolling into a new day: capture the previous plan's unfinished main tasks
-    // as a one-time review (unless one is already pending/handled).
+    // Rolling into a new day: capture the previous plan's unfinished focus
+    // tasks (auto + manual) as a one-time review, unless one's already pending.
     let nextReview = pendingReview;
     if (dailyPlan && dailyPlan.date < today && pendingReview === null) {
       const byId = new Map(tasks.map((t) => [t.id, t] as const));
-      const missed = dailyPlan.mainTaskIds.filter((id) => {
+      const prevIds = [
+        ...dailyPlan.mainTaskIds,
+        ...(dailyPlan.manualTaskIds ?? []),
+      ];
+      const seen = new Set<string>();
+      const missed = prevIds.filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
         const t = byId.get(id);
         return t != null && t.status !== "Done";
       });
@@ -1388,8 +1415,9 @@ export const useProdStore = create<ProdState>()(
       .slice(0, MAIN_PLAN_LIMIT)
       .map((t) => t.id);
 
+    // A fresh day starts with an empty manual focus list.
     set({
-      dailyPlan: { date: today, mainTaskIds: main },
+      dailyPlan: { date: today, mainTaskIds: main, manualTaskIds: [] },
       pendingReview: nextReview,
     });
     pushDailyPlanIfCloud(get);
@@ -1399,7 +1427,17 @@ export const useProdStore = create<ProdState>()(
     const main = rankTasksForPlan(get().tasks, today)
       .slice(0, MAIN_PLAN_LIMIT)
       .map((t) => t.id);
-    set({ dailyPlan: { date: today, mainTaskIds: main } });
+    set((state) => ({
+      // Reset only the auto-suggested picks; keep the user's manual focus list.
+      dailyPlan: {
+        date: today,
+        mainTaskIds: main,
+        manualTaskIds:
+          state.dailyPlan?.date === today
+            ? (state.dailyPlan.manualTaskIds ?? [])
+            : [],
+      },
+    }));
     pushDailyPlanIfCloud(get);
   },
   dismissReview: () => {
@@ -1409,16 +1447,22 @@ export const useProdStore = create<ProdState>()(
   planMoveToToday: (taskId) => {
     set((state) => {
       const today = todayKey();
-      const plan = state.dailyPlan ?? { date: today, mainTaskIds: [] };
-      const mainTaskIds = plan.mainTaskIds.includes(taskId)
-        ? plan.mainTaskIds
-        : [...plan.mainTaskIds, taskId];
+      const plan = state.dailyPlan ?? {
+        date: today,
+        mainTaskIds: [],
+        manualTaskIds: [],
+      };
+      const manual = plan.manualTaskIds ?? [];
+      const manualTaskIds = manual.includes(taskId)
+        ? manual
+        : [...manual, taskId];
       const review = state.pendingReview
         ? state.pendingReview.taskIds.filter((id) => id !== taskId)
         : [];
       return {
-        dailyPlan: { date: today, mainTaskIds },
-        pendingReview: review.length > 0 ? { ...state.pendingReview!, taskIds: review } : null,
+        dailyPlan: { date: today, mainTaskIds: plan.mainTaskIds, manualTaskIds },
+        pendingReview:
+          review.length > 0 ? { ...state.pendingReview!, taskIds: review } : null,
       };
     });
     pushDailyPlanIfCloud(get);
@@ -1426,14 +1470,29 @@ export const useProdStore = create<ProdState>()(
   planRemoveFromToday: (taskId) => {
     set((state) => {
       const today = todayKey();
-      const plan = state.dailyPlan ?? { date: today, mainTaskIds: [] };
+      const plan = state.dailyPlan ?? {
+        date: today,
+        mainTaskIds: [],
+        manualTaskIds: [],
+      };
       return {
         dailyPlan: {
           date: today,
           mainTaskIds: plan.mainTaskIds.filter((id) => id !== taskId),
+          manualTaskIds: (plan.manualTaskIds ?? []).filter((id) => id !== taskId),
         },
       };
     });
+    pushDailyPlanIfCloud(get);
+  },
+  clearManualFocus: () => {
+    // "Clear for the day" = mark every still-open manual-focus task complete.
+    const plan = get().dailyPlan;
+    const ids = (plan?.manualTaskIds ?? []).filter((id) => {
+      const t = get().tasks.find((task) => task.id === id);
+      return t != null && t.status !== "Done";
+    });
+    for (const id of ids) get().completeAndRepeatTask(id);
     pushDailyPlanIfCloud(get);
   },
   planCompleteTask: (taskId) => {
