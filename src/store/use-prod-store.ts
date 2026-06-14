@@ -401,6 +401,46 @@ export function resolveDailyPlan(
   return { main, manual };
 }
 
+/** Priority ordering for focus suggestions (lower = more pressing). */
+const SUGGEST_PRIORITY_RANK: Record<TaskPriority, number> = {
+  Critical: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+/** Extract the YYYY-MM-DD portion of a task deadline, or null when unset. */
+function deadlineIso(task: Task): string | null {
+  const m = task.deadline?.match(/\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : null;
+}
+
+/**
+ * Rank actionable tasks the user has NOT already pulled into focus, so the
+ * Daily Plan can nudge one suggestion at a time. Order: overdue (earliest
+ * first) > due today > everything else by priority then board order. Done and
+ * Inbox tasks, and anything already marked `isToday`, are excluded.
+ */
+export function suggestFocusCandidates(tasks: Task[], today: string): Task[] {
+  return tasks
+    .filter((t) => !t.isToday && t.status !== "Done" && t.status !== "Inbox")
+    .map((t) => {
+      const iso = deadlineIso(t);
+      const bucket = iso && iso < today ? 0 : iso === today ? 1 : 2;
+      return { t, iso, bucket };
+    })
+    .sort((a, b) => {
+      if (a.bucket !== b.bucket) return a.bucket - b.bucket;
+      if (a.bucket === 0 && a.iso && b.iso && a.iso !== b.iso) {
+        return a.iso < b.iso ? -1 : 1;
+      }
+      const pr = SUGGEST_PRIORITY_RANK[a.t.priority] - SUGGEST_PRIORITY_RANK[b.t.priority];
+      if (pr !== 0) return pr;
+      return a.t.order - b.t.order;
+    })
+    .map((x) => x.t);
+}
+
 /** A day's earned effort points (tolerating legacy days with no `points`). */
 function dayPoints(day: DayActivity | undefined): number {
   return day?.points ?? 0;
