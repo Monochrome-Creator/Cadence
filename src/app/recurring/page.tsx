@@ -92,8 +92,9 @@ export default function RecurringPage() {
               Recurring Templates
             </h1>
             <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[var(--c-ink-3)]">
-              Audit every task that spawns a fresh copy on completion. Cancel a
-              schedule to stop it from cloning.
+              Audit every task that reopens itself each new period — weekly tasks
+              in the next week, monthly in the next month, quarterly in the next
+              quarter. Cancel a schedule to stop it from repeating.
             </p>
           </div>
           <Link

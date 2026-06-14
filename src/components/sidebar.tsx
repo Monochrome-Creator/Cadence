@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  CalendarDays,
   Inbox,
   LayoutDashboard,
   LayoutGrid,
@@ -24,6 +25,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 /** Desktop sidebar links. The Pomodoro timer is the widget below, not a link. */
 const NAV_LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/calendar", label: "Daily Plan", icon: CalendarDays },
   { href: "/board", label: "Workspace", icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/goals", label: "North Star", icon: Target },
@@ -38,11 +40,12 @@ const NAV_LINKS = [
  */
 const MOBILE_NAV_LINKS = [
   { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/board", label: "Workspace", icon: LayoutGrid },
+  { href: "/calendar", label: "Today", icon: CalendarDays },
+  { href: "/board", label: "Work", icon: LayoutGrid },
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/timer", label: "Timer", icon: Timer },
-  { href: "/flashcards", label: "Flashcards", icon: Layers },
+  { href: "/flashcards", label: "Cards", icon: Layers },
 ];
 
 /** Shared active-route check for both desktop and mobile navigation. */

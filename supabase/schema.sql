@@ -42,12 +42,19 @@ create table if not exists public.users (
   -- Managed, ordered category list (board columns). Persists empty columns so
   -- a category doesn't vanish when its last task is dragged away.
   categories text[] not null default '{}'::text[],
+  -- Auto-planner state: { plan: { date, mainTaskIds }, review: { date, taskIds } }.
+  -- Synced like categories (no dedicated table); see src/store/cloud-sync.ts.
+  daily_plan jsonb,
   created_at timestamptz not null default now()
 );
 
 -- Existing installs: add the managed category list if it predates this field.
 alter table public.users
   add column if not exists categories text[] not null default '{}'::text[];
+
+-- Existing installs: add the auto-planner (Daily Plan) state column.
+alter table public.users
+  add column if not exists daily_plan jsonb;
 
 -- ---------------------------------------------------------------------------
 -- 2. tasks — board rows, owned by a user and manually ordered.
@@ -81,6 +88,10 @@ create table if not exists public.tasks (
   -- "Four Pillars" life-area attribution. Null for general/untagged tasks.
   life_pillar      text
                      check (life_pillar is null or life_pillar in ('Wealth', 'Health', 'Career', 'Personal_IP')),
+  -- Calendar-period reset stamp for recurring tasks. Stores the period key of
+  -- the period in which the task was last completed (e.g. '2026-W24', '2026-06',
+  -- '2026-Q2'). When the current period's key differs, the task reopens.
+  last_completed_period text,
   updated_at       timestamptz not null default now()
 );
 
@@ -124,6 +135,10 @@ alter table public.tasks
   add constraint tasks_life_pillar_check
     check (life_pillar is null or life_pillar in ('Wealth', 'Health', 'Career', 'Personal_IP'));
 
+-- Existing installs: add the calendar-period reset stamp for recurring tasks.
+alter table public.tasks
+  add column if not exists last_completed_period text;
+
 create index if not exists tasks_user_order_idx
   on public.tasks (user_id, task_order);
 
@@ -135,7 +150,7 @@ create table if not exists public.subtasks (
   id            text primary key,
   task_id       text not null references public.tasks (id) on delete cascade,
   title         text not null default '',
-  status        text not null default 'todo' check (status in ('todo', 'done')),
+  status        text not null default 'todo' check (status in ('todo', 'done', 'cancelled')),
   level         text not null default 'L1'   check (level in ('L1', 'L2', 'L3')),
   subtask_order integer not null default 0,
   -- Leaf completion percent (0–100); null on parent/legacy rows. Parent rows
@@ -151,6 +166,14 @@ alter table public.subtasks
     check (percent is null or (percent >= 0 and percent <= 100));
 alter table public.subtasks
   add column if not exists deadline text;
+
+-- Existing installs: widen the subtask status check to allow 'cancelled'
+-- (a crossed-out micro-task that no longer counts toward progress).
+alter table public.subtasks
+  drop constraint if exists subtasks_status_check;
+alter table public.subtasks
+  add constraint subtasks_status_check
+    check (status in ('todo', 'done', 'cancelled'));
 
 create index if not exists subtasks_task_order_idx
   on public.subtasks (task_id, subtask_order);

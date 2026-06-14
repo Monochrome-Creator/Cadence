@@ -4,6 +4,7 @@ import "./globals.css";
 import { MobileNav, Sidebar } from "@/components/sidebar";
 import { CloudSyncProvider } from "@/components/cloud-sync-provider";
 import { ConnectionStatus } from "@/components/connection-status";
+import { DailyPlanManager } from "@/components/daily-plan-manager";
 import { DebugPanel } from "@/components/debug-panel";
 import { NotificationManager } from "@/components/notification-manager";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
@@ -67,6 +68,7 @@ export default function RootLayout({
       </head>
       <body className="flex min-h-full overflow-x-clip bg-[var(--c-cream)] p-2 text-[var(--c-ink)] md:p-3">
         <CloudSyncProvider />
+        <DailyPlanManager />
         <NotificationManager />
         <ConnectionStatus />
         <DebugPanel />

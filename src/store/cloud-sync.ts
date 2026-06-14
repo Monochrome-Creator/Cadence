@@ -45,6 +45,8 @@ type TaskRow = {
   is_today: boolean;
   /** Four Pillars attribution (Wealth/Health/Career/Personal_IP); null = general. */
   life_pillar: string | null;
+  /** Calendar-period key of the last completion for recurring tasks; null otherwise. */
+  last_completed_period: string | null;
 };
 
 type SubtaskRow = {
@@ -277,6 +279,7 @@ function taskToRow(task: Task, userId: string): TaskRow {
     is_evening: task.isEvening ?? false,
     is_today: task.isToday ?? false,
     life_pillar: task.lifePillar ?? null,
+    last_completed_period: task.lastCompletedPeriod ?? null,
   };
 }
 
@@ -315,6 +318,10 @@ function rowToTask(row: TaskRow, subtasks: Subtask[]): Task {
     ...(row.is_today ? { isToday: true } : {}),
     // Tolerate rows synced before the life_pillar column existed (null/undefined).
     ...(row.life_pillar ? { lifePillar: row.life_pillar as LifePillar } : {}),
+    // Tolerate rows synced before the last_completed_period column existed.
+    ...(row.last_completed_period
+      ? { lastCompletedPeriod: row.last_completed_period }
+      : {}),
     subtasks,
   };
 }
@@ -611,6 +618,62 @@ export async function pushCategories(categories: string[]): Promise<void> {
     }
   } catch (error) {
     console.error("[cadence] push categories threw", error);
+  }
+}
+
+/* ------------------------------ daily plan ------------------------------- */
+
+/** Shape persisted in `users.daily_plan` (jsonb) — the auto-plan + missed review. */
+export type DailyPlanSync = {
+  plan: { date: string; mainTaskIds: string[] } | null;
+  review: { date: string; taskIds: string[] } | null;
+};
+
+/**
+ * Pulls the user's stored daily plan + pending review. Returns `null` when sync
+ * is off, no user is signed in, the column is empty, or the read fails — callers
+ * keep their local copy then.
+ */
+export async function pullDailyPlan(): Promise<DailyPlanSync | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return null;
+    const { data, error } = await withTimeout(
+      supabase.from("users").select("daily_plan").eq("id", userId).maybeSingle(),
+      "pull daily plan"
+    );
+    if (error) {
+      if (!isMissingTable(error)) {
+        console.error("[cadence] pull daily plan failed", error);
+      }
+      return null;
+    }
+    return (data?.daily_plan as DailyPlanSync | null) ?? null;
+  } catch (error) {
+    console.error("[cadence] pull daily plan threw", error);
+    return null;
+  }
+}
+
+/** Persists the user's daily plan + pending review. Fire-and-forget. */
+export async function pushDailyPlan(value: DailyPlanSync): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return;
+    const { error } = await withAuthRetry(
+      supabase,
+      () => supabase.from("users").update({ daily_plan: value }).eq("id", userId),
+      "push daily plan"
+    );
+    if (error && !isMissingTable(error)) {
+      console.error("[cadence] push daily plan failed", error);
+    }
+  } catch (error) {
+    console.error("[cadence] push daily plan threw", error);
   }
 }
 

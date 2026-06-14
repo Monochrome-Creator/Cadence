@@ -5,6 +5,11 @@ import {
   addMonths,
   addWeeks,
   format,
+  getISOWeek,
+  getISOWeekYear,
+  getMonth,
+  getQuarter,
+  getYear,
   isValid,
   parseISO,
   startOfWeek,
@@ -16,8 +21,10 @@ import {
   ensureUserRow,
   isSupabaseConfigured,
   pullCategories,
+  pullDailyPlan,
   pullTasks,
   pushCategories,
+  pushDailyPlan,
   pushTasks,
   type SyncOutcome,
 } from "./cloud-sync";
@@ -113,6 +120,14 @@ export interface Task {
   lifePillar?: LifePillar;
   /** Repeat interval driving completeAndRepeatTask. */
   recurrence: Recurrence;
+  /**
+   * Calendar-period identifier of the period in which this recurring task was
+   * last completed — e.g. "2026-06-14" (daily), "2026-W24" (weekly), "2026-06"
+   * (monthly), "2026-Q2" (quarterly). When a recurring task is Done and this no
+   * longer matches the current period, {@link refreshRecurringTasks} reopens it.
+   * Undefined for one-off tasks and recurring tasks that have never completed.
+   */
+  lastCompletedPeriod?: string;
   pomodorosLogged: number;
   /** Manual sort position for drag-and-drop ordering (ascending). */
   order: number;
@@ -253,25 +268,6 @@ export function effectiveTaskProgress(task: Task): number {
 }
 
 /**
- * Mirrors a task's status to its micro-task roll-up: when children exist and
- * average a full 100%, the task flips to Done so its status matches its bar.
- * Only auto-completes non-recurring tasks (recurring ones must go through
- * completeAndRepeatTask so the next occurrence is spawned) and never
- * auto-reopens — walking a task back stays a deliberate user action.
- */
-function syncStatusToProgress(task: Task): Task {
-  if (
-    task.recurrence === "none" &&
-    task.status !== "Done" &&
-    task.subtasks.length > 0 &&
-    computeTaskProgress(task.subtasks) >= 100
-  ) {
-    return { ...task, status: "Done" };
-  }
-  return task;
-}
-
-/**
  * Card fraction badge data: how many L3 action tasks are fully complete out of
  * the total number of L3 tasks. A leaf is "complete" at 100% (which includes a
  * checked-off row). Returns { done: 0, total: 0 } when the task has no L3s — the
@@ -367,6 +363,109 @@ export function taskPoints(priority: TaskPriority): number {
  * have been earned from completed tasks.
  */
 export const DAILY_GOAL_POINTS = 10;
+
+/* -------------------------------------------------------------------------- */
+/*                          Daily Plan (auto-planner)                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How many "main" tasks the auto-planner commits to per day. Deliberately tiny
+ * (1–2) so the day feels achievable rather than overwhelming — everything else
+ * is surfaced as optional backlog, not required work.
+ */
+export const MAIN_PLAN_LIMIT = 2;
+
+/** Today as a local yyyy-MM-dd string (date-only, for plan/period comparisons). */
+export function todayKey(date: Date = new Date()): string {
+  return format(date, "yyyy-MM-dd");
+}
+
+/** The auto-generated plan for one calendar day. */
+export interface DailyPlan {
+  /** yyyy-MM-dd this plan was generated for. */
+  date: string;
+  /** The 1–2 main tasks committed to for the day, in priority order. */
+  mainTaskIds: string[];
+}
+
+/** A pending "you missed these" review surfaced on the next app open. */
+export interface PendingReview {
+  /** The plan-date whose main tasks went unfinished. */
+  date: string;
+  /** Tasks from that day's plan that were still incomplete when the day rolled. */
+  taskIds: string[];
+}
+
+/** Lower rank = more important, mirroring the dashboard's priority ordering. */
+const PLAN_PRIORITY_RANK: Record<TaskPriority, number> = {
+  Critical: 0,
+  High: 1,
+  Medium: 2,
+  Low: 3,
+};
+
+/** A task is plannable when it's actionable — not finished and not still in the Inbox. */
+function isPlannable(task: Task): boolean {
+  return task.status !== "Done" && task.status !== "Inbox";
+}
+
+/**
+ * Bucket a task for the daily plan. Lower bucket = picked first, exactly matching
+ * the requested priority order:
+ *   0 overdue → 1 due today → 2 recurring work → 3 lower-priority backlog.
+ */
+function planBucket(task: Task, today: string): number {
+  const iso = task.deadline?.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  if (iso && iso < today) return 0; // overdue
+  if (iso && iso === today) return 1; // due today
+  if (task.recurrence !== "none") return 2; // recurring work micro-task
+  return 3; // backlog
+}
+
+/**
+ * Rank all actionable tasks for the day in the planner's preference order
+ * (bucket → priority → manual order). Pure: callers slice the head for "main"
+ * work and keep the tail as optional backlog.
+ */
+export function rankTasksForPlan(tasks: Task[], today: string = todayKey()): Task[] {
+  return tasks
+    .filter(isPlannable)
+    .sort((a, b) => {
+      const bucket = planBucket(a, today) - planBucket(b, today);
+      if (bucket !== 0) return bucket;
+      const prio = PLAN_PRIORITY_RANK[a.priority] - PLAN_PRIORITY_RANK[b.priority];
+      if (prio !== 0) return prio;
+      return a.order - b.order;
+    });
+}
+
+/** A day's auto-plan split into the committed `main` tasks and the `optional` rest. */
+export interface DailyPlanView {
+  main: Task[];
+  optional: Task[];
+}
+
+/**
+ * Resolve a stored {@link DailyPlan} against the live task list for rendering.
+ * `main` follows the IDs the plan committed to (kept stable through the day, and
+ * still shown once completed so the user sees their win); `optional` is every
+ * other actionable task in planner order. Returns an empty split when no plan.
+ */
+export function resolveDailyPlan(
+  plan: DailyPlan | null,
+  tasks: Task[],
+  today: string = todayKey()
+): DailyPlanView {
+  if (!plan) return { main: [], optional: [] };
+  const mainIds = new Set(plan.mainTaskIds);
+  const byId = new Map(tasks.map((t) => [t.id, t] as const));
+  // Preserve the committed order; drop IDs whose task was deleted.
+  const main = plan.mainTaskIds
+    .map((id) => byId.get(id))
+    .filter((t): t is Task => t != null);
+  const optional = rankTasksForPlan(tasks, today).filter((t) => !mainIds.has(t.id));
+  return { main, optional };
+}
 
 /** A day's earned effort points (tolerating legacy days with no `points`). */
 function dayPoints(day: DayActivity | undefined): number {
@@ -540,6 +639,18 @@ interface ProdState {
   activeTaskId: string | null;
   /** Daily productivity log keyed by local `yyyy-MM-dd` — powers the streak. */
   history: Record<string, DayActivity>;
+  /**
+   * The auto-generated plan for the current day (1–2 main tasks). Regenerated
+   * when the calendar day rolls over via {@link ensureDailyPlan}. Null until the
+   * first plan is built.
+   */
+  dailyPlan: DailyPlan | null;
+  /**
+   * A "you missed these" review for the previous day's unfinished plan, surfaced
+   * once on the next app open. Cleared as soon as the user responds so it never
+   * nags repeatedly. Null when there's nothing to review.
+   */
+  pendingReview: PendingReview | null;
 
   // Cloud sync
   /** Whether Supabase credentials are present and cloud sync is active. */
@@ -627,10 +738,33 @@ interface ProdState {
    */
   deleteCategory: (name: string) => void;
   /**
-   * Marks a task Done and, when it recurs, appends a fresh copy whose deadline
-   * is advanced by one recurrence interval (via date-fns).
+   * Completes a task. One-off tasks simply go Done; a recurring task is marked
+   * Done and stamped with the current calendar period — it stays a SINGLE card
+   * (no clones) and {@link refreshRecurringTasks} reopens it next period.
    */
   completeAndRepeatTask: (taskId: string) => void;
+  /**
+   * Reopens recurring tasks whose completion period has elapsed: a Done weekly
+   * task becomes available again next calendar week, monthly next month, etc.
+   * Resets its micro-tasks/progress and rolls a stale deadline into the current
+   * period. Idempotent — a no-op when nothing has rolled over. Call on app open
+   * and on day change.
+   */
+  refreshRecurringTasks: () => void;
+  /**
+   * Ensures {@link dailyPlan} targets today, regenerating it when the calendar
+   * day has rolled over. On rollover it also captures the previous day's
+   * unfinished main tasks into {@link pendingReview} (once). Idempotent.
+   */
+  ensureDailyPlan: () => void;
+  /** Force a fresh auto-plan for today (the Daily Plan "Re-plan" affordance). */
+  regenerateDailyPlan: () => void;
+  /** Dismiss the missed-task review without further action ("Skip for now"). */
+  dismissReview: () => void;
+  /** Move a reviewed missed task into today's plan, then drop it from the review. */
+  planMoveToToday: (taskId: string) => void;
+  /** Complete a reviewed missed task in place, then drop it from the review. */
+  planCompleteTask: (taskId: string) => void;
   addSubtask: (taskId: string, title: string, level: SubtaskLevel) => void;
   /**
    * Inserts a blank micro-task immediately after `afterSubtaskId` at the given
@@ -810,22 +944,61 @@ function getNextMode(
     : "shortBreak";
 }
 
+/** Advance a Date by exactly one recurrence interval. Never called with "none". */
+function addRecurrenceInterval(base: Date, recurrence: Recurrence): Date {
+  return recurrence === "daily"
+    ? addDays(base, 1)
+    : recurrence === "weekly"
+      ? addWeeks(base, 1)
+      : recurrence === "quarterly"
+        ? addMonths(base, 3)
+        : addMonths(base, 1);
+}
+
 /**
- * Advance a yyyy-MM-dd deadline by one recurrence interval. Falls back to today
- * as the base when the stored deadline is missing/unparseable. Only meaningful
- * for recurring tasks — never called with "none".
+ * Advance a yyyy-MM-dd deadline forward by recurrence intervals until it lands
+ * on or after `from` (today by default) — so a recurring task that was overdue
+ * by several periods gets a due date in the current period, not just +1 from a
+ * long-past date. Falls back to `from` when the stored deadline is empty/invalid.
  */
-function nextDeadline(deadline: string, recurrence: Recurrence): string {
-  const base = isValid(parseISO(deadline)) ? parseISO(deadline) : new Date();
-  const advanced =
-    recurrence === "daily"
-      ? addDays(base, 1)
-      : recurrence === "weekly"
-        ? addWeeks(base, 1)
-        : recurrence === "quarterly"
-          ? addMonths(base, 3)
-          : addMonths(base, 1);
-  return format(advanced, "yyyy-MM-dd");
+function advanceDeadlineToCurrentPeriod(
+  deadline: string,
+  recurrence: Recurrence,
+  from: Date
+): string {
+  if (!isValid(parseISO(deadline))) return format(from, "yyyy-MM-dd");
+  const fromKey = format(from, "yyyy-MM-dd");
+  let next = parseISO(deadline);
+  // Guard the loop so a corrupt date can never spin forever.
+  for (let i = 0; i < 1000 && format(next, "yyyy-MM-dd") < fromKey; i++) {
+    next = addRecurrenceInterval(next, recurrence);
+  }
+  return format(next, "yyyy-MM-dd");
+}
+
+/**
+ * Calendar-period key for a recurring task: the identifier that stays constant
+ * within one occurrence window and flips when the next window begins. This is
+ * what drives "resets next week/month/quarter" — completion stamps the current
+ * key, and {@link refreshRecurringTasks} reopens the task once the key changes.
+ *   daily     -> "2026-06-14"   (the calendar day)
+ *   weekly    -> "2026-W24"     (ISO week — Mon-anchored, year-correct at edges)
+ *   monthly   -> "2026-06"      (calendar month)
+ *   quarterly -> "2026-Q2"      (calendar quarter)
+ */
+function periodKey(recurrence: Recurrence, date: Date): string {
+  switch (recurrence) {
+    case "daily":
+      return format(date, "yyyy-MM-dd");
+    case "weekly":
+      return `${getISOWeekYear(date)}-W${String(getISOWeek(date)).padStart(2, "0")}`;
+    case "monthly":
+      return `${getYear(date)}-${String(getMonth(date) + 1).padStart(2, "0")}`;
+    case "quarterly":
+      return `${getYear(date)}-Q${getQuarter(date)}`;
+    default:
+      return format(date, "yyyy-MM-dd");
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -892,6 +1065,13 @@ function pushCategoriesIfCloud(getState: () => ProdState): void {
   void pushCategories(getState().categories);
 }
 
+/** Persist the daily plan + pending review to the cloud (no-op when unconfigured). */
+function pushDailyPlanIfCloud(getState: () => ProdState): void {
+  if (!isSupabaseConfigured) return;
+  const { dailyPlan, pendingReview } = getState();
+  void pushDailyPlan({ plan: dailyPlan, review: pendingReview });
+}
+
 export const useProdStore = create<ProdState>()(
   persist(
     (set, get) => ({
@@ -901,6 +1081,8 @@ export const useProdStore = create<ProdState>()(
   flashcards: [],
   activeTaskId: null,
   history: {},
+  dailyPlan: null,
+  pendingReview: null,
 
   cloudEnabled: isSupabaseConfigured,
   isHydrated: false,
@@ -1124,52 +1306,132 @@ export const useProdStore = create<ProdState>()(
     const becameDone = target.status !== "Done";
     const points = taskPoints(target.priority);
 
-    // A one-off task simply completes — nothing to repeat.
-    if (target.recurrence === "none") {
-      set((state) => ({
-        tasks: state.tasks.map((t) =>
-          t.id === taskId ? { ...t, status: "Done" as TaskStatus } : t
-        ),
-        history: becameDone
-          ? logTaskCompletion(state.history, points, target.lifePillar)
-          : state.history,
-      }));
-      queueTaskPush(get, [taskId]);
-      return;
+    // Recurring tasks stay a SINGLE card (no clones): mark Done and stamp the
+    // current calendar period. refreshRecurringTasks reopens it once the period
+    // rolls over. One-off tasks just go Done with no stamp.
+    const stamp =
+      target.recurrence !== "none"
+        ? periodKey(target.recurrence, new Date())
+        : undefined;
+
+    set((state) => ({
+      tasks: state.tasks.map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: "Done" as TaskStatus,
+              ...(stamp ? { lastCompletedPeriod: stamp } : {}),
+            }
+          : t
+      ),
+      history: becameDone
+        ? logTaskCompletion(state.history, points, target.lifePillar)
+        : state.history,
+    }));
+    queueTaskPush(get, [taskId]);
+  },
+  refreshRecurringTasks: () => {
+    const now = new Date();
+    const reopened: string[] = [];
+    set((state) => {
+      const tasks = state.tasks.map((task) => {
+        if (task.recurrence === "none" || task.status !== "Done") return task;
+        // Still inside the period it was completed in — keep it Done/hidden.
+        if (task.lastCompletedPeriod === periodKey(task.recurrence, now)) {
+          return task;
+        }
+        // The period has elapsed: reopen a fresh occurrence in place.
+        reopened.push(task.id);
+        return {
+          ...task,
+          status: "Not Started" as TaskStatus,
+          lastCompletedPeriod: undefined,
+          pomodorosLogged: 0,
+          progress: task.subtasks.length > 0 ? task.progress : 0,
+          deadline: task.deadline
+            ? advanceDeadlineToCurrentPeriod(task.deadline, task.recurrence, now)
+            : task.deadline,
+          subtasks: task.subtasks.map((s) => ({
+            ...s,
+            status: "todo" as SubtaskStatus,
+          })),
+        };
+      });
+      return reopened.length > 0 ? { tasks } : {};
+    });
+    if (reopened.length > 0) queueTaskPush(get, reopened);
+  },
+  ensureDailyPlan: () => {
+    const today = todayKey();
+    const { dailyPlan, pendingReview, tasks } = get();
+
+    // Already planned for today — nothing to roll over.
+    if (dailyPlan && dailyPlan.date === today) return;
+
+    // Rolling into a new day: capture the previous plan's unfinished main tasks
+    // as a one-time review (unless one is already pending/handled).
+    let nextReview = pendingReview;
+    if (dailyPlan && dailyPlan.date < today && pendingReview === null) {
+      const byId = new Map(tasks.map((t) => [t.id, t] as const));
+      const missed = dailyPlan.mainTaskIds.filter((id) => {
+        const t = byId.get(id);
+        return t != null && t.status !== "Done";
+      });
+      if (missed.length > 0) {
+        nextReview = { date: dailyPlan.date, taskIds: missed };
+      }
     }
 
-    // Recurring: mark this occurrence Done and append a fresh copy with the
-    // deadline advanced by one interval.
-    const newId = `task-${crypto.randomUUID()}`;
+    const main = rankTasksForPlan(tasks, today)
+      .slice(0, MAIN_PLAN_LIMIT)
+      .map((t) => t.id);
+
+    set({
+      dailyPlan: { date: today, mainTaskIds: main },
+      pendingReview: nextReview,
+    });
+    pushDailyPlanIfCloud(get);
+  },
+  regenerateDailyPlan: () => {
+    const today = todayKey();
+    const main = rankTasksForPlan(get().tasks, today)
+      .slice(0, MAIN_PLAN_LIMIT)
+      .map((t) => t.id);
+    set({ dailyPlan: { date: today, mainTaskIds: main } });
+    pushDailyPlanIfCloud(get);
+  },
+  dismissReview: () => {
+    set({ pendingReview: null });
+    pushDailyPlanIfCloud(get);
+  },
+  planMoveToToday: (taskId) => {
     set((state) => {
-      const maxOrder = state.tasks.reduce((max, t) => Math.max(max, t.order), -1);
-      const repeated: Task = {
-        ...target,
-        id: newId,
-        status: "Not Started",
-        pomodorosLogged: 0,
-        order: maxOrder + 1,
-        deadline: nextDeadline(target.deadline, target.recurrence),
-        // Fresh copies of the micro-tasks, reset to to-do.
-        subtasks: target.subtasks.map((s) => ({
-          ...s,
-          id: `subtask-${crypto.randomUUID()}`,
-          status: "todo" as SubtaskStatus,
-        })),
-      };
+      const today = todayKey();
+      const plan = state.dailyPlan ?? { date: today, mainTaskIds: [] };
+      const mainTaskIds = plan.mainTaskIds.includes(taskId)
+        ? plan.mainTaskIds
+        : [...plan.mainTaskIds, taskId];
+      const review = state.pendingReview
+        ? state.pendingReview.taskIds.filter((id) => id !== taskId)
+        : [];
       return {
-        tasks: [
-          ...state.tasks.map((t) =>
-            t.id === taskId ? { ...t, status: "Done" as TaskStatus } : t
-          ),
-          repeated,
-        ],
-        history: becameDone
-          ? logTaskCompletion(state.history, points, target.lifePillar)
-          : state.history,
+        dailyPlan: { date: today, mainTaskIds },
+        pendingReview: review.length > 0 ? { ...state.pendingReview!, taskIds: review } : null,
       };
     });
-    queueTaskPush(get, [taskId, newId]);
+    pushDailyPlanIfCloud(get);
+  },
+  planCompleteTask: (taskId) => {
+    // Reuse the unified completion path (handles recurring stamping too).
+    get().completeAndRepeatTask(taskId);
+    set((state) => {
+      if (!state.pendingReview) return {};
+      const taskIds = state.pendingReview.taskIds.filter((id) => id !== taskId);
+      return {
+        pendingReview: taskIds.length > 0 ? { ...state.pendingReview, taskIds } : null,
+      };
+    });
+    pushDailyPlanIfCloud(get);
   },
   addSubtask: (taskId, title, level) => {
     const trimmed = title.trim();
@@ -1225,30 +1487,19 @@ export const useProdStore = create<ProdState>()(
     return newId;
   },
   updateSubtask: (taskId, subtaskId, updates) => {
-    let becameDone = false;
-    let completedPoints = 0;
-    let completedPillar: LifePillar | undefined;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
-        const updated: Task = {
+        // Micro-task edits only update the progress roll-up — they never flip
+        // the parent task to Done. The task is completed solely by an explicit
+        // user action on the card itself.
+        return {
           ...task,
           subtasks: task.subtasks.map((subtask) =>
             subtask.id === subtaskId ? { ...subtask, ...updates } : subtask
           ),
         };
-        // A change that pushes the roll-up to 100% auto-completes the task.
-        const synced = syncStatusToProgress(updated);
-        if (synced.status === "Done" && task.status !== "Done") {
-          becameDone = true;
-          completedPoints = taskPoints(task.priority);
-          completedPillar = task.lifePillar;
-        }
-        return synced;
       }),
-      history: becameDone
-        ? logTaskCompletion(state.history, completedPoints, completedPillar)
-        : state.history,
     }));
     queueTaskPush(get, [taskId]);
   },
@@ -1296,9 +1547,6 @@ export const useProdStore = create<ProdState>()(
     queueTaskPush(get, [taskId]);
   },
   toggleSubtaskComplete: (taskId, subtaskId) => {
-    let becameDone = false;
-    let completedPoints = 0;
-    let completedPillar: LifePillar | undefined;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
@@ -1316,31 +1564,19 @@ export const useProdStore = create<ProdState>()(
         ) {
           end += 1;
         }
-        const updated: Task = {
+        // Roll-up only: completing micro-tasks never auto-completes the parent
+        // task — the user marks the card Done themselves once L1/L2/L3 are done.
+        return {
           ...task,
           subtasks: task.subtasks.map((s, i) =>
             i >= index && i < end ? { ...s, status: nextStatus } : s
           ),
         };
-        // Completing the last micro-tasks rolls the parent up to Done.
-        const synced = syncStatusToProgress(updated);
-        if (synced.status === "Done" && task.status !== "Done") {
-          becameDone = true;
-          completedPoints = taskPoints(task.priority);
-          completedPillar = task.lifePillar;
-        }
-        return synced;
       }),
-      history: becameDone
-        ? logTaskCompletion(state.history, completedPoints, completedPillar)
-        : state.history,
     }));
     queueTaskPush(get, [taskId]);
   },
   toggleSubtaskCancelled: (taskId, subtaskId) => {
-    let becameDone = false;
-    let completedPoints = 0;
-    let completedPillar: LifePillar | undefined;
     set((state) => ({
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
@@ -1358,24 +1594,15 @@ export const useProdStore = create<ProdState>()(
         ) {
           end += 1;
         }
-        const updated: Task = {
+        // Roll-up only: cancelling micro-tasks never auto-completes the parent
+        // task — completion stays an explicit action on the card.
+        return {
           ...task,
           subtasks: task.subtasks.map((s, i) =>
             i >= index && i < end ? { ...s, status: nextStatus } : s
           ),
         };
-        // Cancelling the last open micro-tasks resolves the card to Done.
-        const synced = syncStatusToProgress(updated);
-        if (synced.status === "Done" && task.status !== "Done") {
-          becameDone = true;
-          completedPoints = taskPoints(task.priority);
-          completedPillar = task.lifePillar;
-        }
-        return synced;
       }),
-      history: becameDone
-        ? logTaskCompletion(state.history, completedPoints, completedPillar)
-        : state.history,
     }));
     queueTaskPush(get, [taskId]);
   },
@@ -1453,6 +1680,16 @@ export const useProdStore = create<ProdState>()(
         set({ categories: seeded });
         await pushCategories(seeded);
       }
+
+      // Daily plan + pending review: adopt the cloud copy when present so the
+      // plan and missed-task review follow the user across devices.
+      const cloudPlan = await pullDailyPlan();
+      if (cloudPlan) {
+        set({
+          dailyPlan: cloudPlan.plan ?? get().dailyPlan,
+          pendingReview: cloudPlan.review ?? get().pendingReview,
+        });
+      }
       set({ connectionStatus: "synced" });
     } catch (error) {
       console.error("[cadence] hydrate failed", error);
@@ -1510,6 +1747,13 @@ export const useProdStore = create<ProdState>()(
       const cloudCategories = await pullCategories();
       if (cloudCategories && cloudCategories.length > 0) {
         set({ categories: cloudCategories });
+      }
+      const cloudPlan = await pullDailyPlan();
+      if (cloudPlan) {
+        set({
+          dailyPlan: cloudPlan.plan ?? get().dailyPlan,
+          pendingReview: cloudPlan.review ?? get().pendingReview,
+        });
       }
       set({ connectionStatus: "synced" });
     } catch (error) {
@@ -1609,6 +1853,8 @@ export const useProdStore = create<ProdState>()(
         flashcards: state.flashcards,
         activeTaskId: state.activeTaskId,
         history: state.history,
+        dailyPlan: state.dailyPlan,
+        pendingReview: state.pendingReview,
       }),
     }
   )
