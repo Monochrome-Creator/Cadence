@@ -761,8 +761,10 @@ interface ProdState {
   regenerateDailyPlan: () => void;
   /** Dismiss the missed-task review without further action ("Skip for now"). */
   dismissReview: () => void;
-  /** Move a reviewed missed task into today's plan, then drop it from the review. */
+  /** Add a task to today's plan as a main focus item (manual override). */
   planMoveToToday: (taskId: string) => void;
+  /** Remove a task from today's main focus, demoting it back to the backlog. */
+  planRemoveFromToday: (taskId: string) => void;
   /** Complete a reviewed missed task in place, then drop it from the review. */
   planCompleteTask: (taskId: string) => void;
   addSubtask: (taskId: string, title: string, level: SubtaskLevel) => void;
@@ -1417,6 +1419,19 @@ export const useProdStore = create<ProdState>()(
       return {
         dailyPlan: { date: today, mainTaskIds },
         pendingReview: review.length > 0 ? { ...state.pendingReview!, taskIds: review } : null,
+      };
+    });
+    pushDailyPlanIfCloud(get);
+  },
+  planRemoveFromToday: (taskId) => {
+    set((state) => {
+      const today = todayKey();
+      const plan = state.dailyPlan ?? { date: today, mainTaskIds: [] };
+      return {
+        dailyPlan: {
+          date: today,
+          mainTaskIds: plan.mainTaskIds.filter((id) => id !== taskId),
+        },
       };
     });
     pushDailyPlanIfCloud(get);

@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Repeat,
   Sun,
+  X,
 } from "lucide-react";
 
 import {
@@ -63,12 +64,14 @@ function PlanCard({
   onComplete,
   variant,
   onPromote,
+  onRemove,
 }: {
   task: Task;
   today: string;
   onComplete: (id: string) => void;
   variant: "main" | "optional";
   onPromote?: (id: string) => void;
+  onRemove?: (id: string) => void;
 }) {
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
@@ -155,6 +158,18 @@ function PlanCard({
           Focus
         </button>
       )}
+
+      {variant === "main" && onRemove && !done && (
+        <button
+          type="button"
+          onClick={() => onRemove(task.id)}
+          title="Remove from today's focus"
+          aria-label="Remove from today's focus"
+          className="flex size-7 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#9b3b3b]"
+        >
+          <X className="size-4" />
+        </button>
+      )}
     </div>
   );
 }
@@ -166,8 +181,9 @@ export default function CalendarPage() {
   const regenerateDailyPlan = useProdStore((state) => state.regenerateDailyPlan);
   const planCompleteTask = useProdStore((state) => state.planCompleteTask);
   const planMoveToToday = useProdStore((state) => state.planMoveToToday);
+  const planRemoveFromToday = useProdStore((state) => state.planRemoveFromToday);
 
-  const [showOptional, setShowOptional] = useState(false);
+  const [showOptional, setShowOptional] = useState(true);
   const today = todayKey();
 
   // Make sure a plan exists for today (handles first visit / day rollover).
@@ -198,17 +214,18 @@ export default function CalendarPage() {
             </h1>
             <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-[var(--c-ink-3)]">
               A calm, realistic focus for today — just one or two things that
-              matter most. Everything else waits quietly in your backlog.
+              matter most. Swap any of them: remove with the ✕, or add a backlog
+              item below with <span className="font-medium text-[#a35d4d]">Focus</span>.
             </p>
           </div>
           <button
             type="button"
             onClick={regenerateDailyPlan}
-            title="Rebuild today's plan from your current tasks"
+            title="Reset today's focus to the auto-suggested top priorities"
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-3 py-2 text-[12.5px] font-medium text-[var(--c-ink-3)] transition-colors hover:border-[#e7c4c4] hover:bg-[#fcf4ef] hover:text-[#a35d4d]"
           >
             <RefreshCw className="size-3.5" />
-            Replan
+            Reset to suggested
           </button>
         </header>
 
@@ -234,6 +251,7 @@ export default function CalendarPage() {
                   task={task}
                   today={today}
                   onComplete={planCompleteTask}
+                  onRemove={planRemoveFromToday}
                   variant="main"
                 />
               ))}
