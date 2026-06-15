@@ -45,6 +45,10 @@ create table if not exists public.users (
   -- Auto-planner state: { plan: { date, mainTaskIds }, review: { date, taskIds } }.
   -- Synced like categories (no dedicated table); see src/store/cloud-sync.ts.
   daily_plan jsonb,
+  -- North Star goals + flashcards: stored whole as jsonb on the user row (no
+  -- dedicated table). Synced like daily_plan; see src/store/cloud-sync.ts.
+  goals jsonb,
+  flashcards jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -55,6 +59,12 @@ alter table public.users
 -- Existing installs: add the auto-planner (Daily Plan) state column.
 alter table public.users
   add column if not exists daily_plan jsonb;
+
+-- Existing installs: add the North Star goals + flashcards state columns.
+alter table public.users
+  add column if not exists goals jsonb;
+alter table public.users
+  add column if not exists flashcards jsonb;
 
 -- ---------------------------------------------------------------------------
 -- 2. tasks — board rows, owned by a user and manually ordered.

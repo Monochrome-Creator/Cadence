@@ -22,9 +22,13 @@ import {
   isSupabaseConfigured,
   pullCategories,
   pullDailyPlan,
+  pullFlashcards,
+  pullGoals,
   pullTasks,
   pushCategories,
   pushDailyPlan,
+  pushFlashcards,
+  pushGoals,
   pushTasks,
   type SyncOutcome,
 } from "./cloud-sync";
@@ -1048,6 +1052,18 @@ function pushDailyPlanIfCloud(getState: () => ProdState): void {
   void pushDailyPlan({ plan: dailyPlan, review: pendingReview });
 }
 
+/** Persist the North Star goals to the cloud (no-op when unconfigured). */
+function pushGoalsIfCloud(getState: () => ProdState): void {
+  if (!isSupabaseConfigured) return;
+  void pushGoals(getState().goals);
+}
+
+/** Persist the flashcards to the cloud (no-op when unconfigured). */
+function pushFlashcardsIfCloud(getState: () => ProdState): void {
+  if (!isSupabaseConfigured) return;
+  void pushFlashcards(getState().flashcards);
+}
+
 export const useProdStore = create<ProdState>()(
   persist(
     (set, get) => ({
@@ -1628,11 +1644,13 @@ export const useProdStore = create<ProdState>()(
         ],
       };
     });
+    pushGoalsIfCloud(get);
   },
   updateGoal: (id, updates) => {
     set((state) => ({
       goals: state.goals.map((g) => (g.id === id ? { ...g, ...updates } : g)),
     }));
+    pushGoalsIfCloud(get);
   },
   deleteGoal: (id) => {
     set((state) => ({
@@ -1643,9 +1661,13 @@ export const useProdStore = create<ProdState>()(
         t.goalId === id ? { ...t, goalId: undefined } : t
       ),
     }));
+    pushGoalsIfCloud(get);
   },
 
-  setFlashcards: (flashcards) => set({ flashcards }),
+  setFlashcards: (flashcards) => {
+    set({ flashcards });
+    pushFlashcardsIfCloud(get);
+  },
   setActiveTask: (id) => set({ activeTaskId: id }),
 
   hydrate: async () => {
@@ -1702,6 +1724,26 @@ export const useProdStore = create<ProdState>()(
           pendingReview: cloudPlan.review ?? get().pendingReview,
         });
       }
+      // North Star goals + flashcards: adopt the cloud copy when present, or
+      // seed it from local on first run so existing local data isn't lost.
+      const cloudGoals = await pullGoals();
+      if (cloudGoals === null) {
+        // Read failed — keep the local list.
+      } else if (cloudGoals.length > 0) {
+        set({ goals: cloudGoals });
+      } else if (get().goals.length > 0) {
+        await pushGoals(get().goals);
+      }
+
+      const cloudCards = await pullFlashcards();
+      if (cloudCards === null) {
+        // Read failed — keep the local list.
+      } else if (cloudCards.length > 0) {
+        set({ flashcards: cloudCards });
+      } else if (get().flashcards.length > 0) {
+        await pushFlashcards(get().flashcards);
+      }
+
       set({ connectionStatus: "synced" });
     } catch (error) {
       console.error("[cadence] hydrate failed", error);
@@ -1766,6 +1808,22 @@ export const useProdStore = create<ProdState>()(
           dailyPlan: cloudPlan.plan ?? get().dailyPlan,
           pendingReview: cloudPlan.review ?? get().pendingReview,
         });
+      }
+      const cloudGoals = await pullGoals();
+      if (cloudGoals === null) {
+        // Read failed — keep local.
+      } else if (cloudGoals.length > 0) {
+        set({ goals: cloudGoals });
+      } else if (get().goals.length > 0) {
+        await pushGoals(get().goals);
+      }
+      const cloudCards = await pullFlashcards();
+      if (cloudCards === null) {
+        // Read failed — keep local.
+      } else if (cloudCards.length > 0) {
+        set({ flashcards: cloudCards });
+      } else if (get().flashcards.length > 0) {
+        await pushFlashcards(get().flashcards);
       }
       set({ connectionStatus: "synced" });
     } catch (error) {
