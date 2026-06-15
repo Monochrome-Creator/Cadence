@@ -181,7 +181,7 @@ const PILL_TRIGGER =
  * falls back to 240px (the original responsive minimum) when unset.
  */
 const GRID_COLS =
-  "xl:grid-cols-[minmax(var(--task-col,290px),1.4fr)_108px_90px_108px_104px_68px_80px]";
+  "xl:grid-cols-[minmax(var(--task-col,290px),1.4fr)_108px_90px_104px_132px_68px_80px]";
 
 /** Drag bounds for the resizable Task column (px). Max stays within max-w-6xl. */
 const TASK_COL_MIN = 260;
