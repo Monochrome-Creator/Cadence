@@ -1749,6 +1749,9 @@ export default function BoardPage() {
   };
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  // Narrow the board to a single main job category so the user can focus on one
+  // area at a time. "all" shows every category.
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [showCompleted, setShowCompleted] = useState(false);
   const [sortDirection, setSortDirection] = useState<SortDirection>("none");
   const [categorySort, setCategorySort] = useState<CategorySort>("none");
@@ -1834,6 +1837,7 @@ export default function BoardPage() {
   // Manual drag only makes sense on the full, unsorted list.
   const dragEnabled =
     statusFilter === "all" &&
+    categoryFilter === "all" &&
     sortDirection === "none" &&
     categorySort === "none";
 
@@ -1848,10 +1852,16 @@ export default function BoardPage() {
       (task) =>
         task.status !== "Inbox" && task.status !== "Done" && !task.isToday
     );
-    const filtered =
+    const byStatus =
       statusFilter === "all"
         ? boardTasks
         : boardTasks.filter((task) => task.status === statusFilter);
+    const filtered =
+      categoryFilter === "all"
+        ? byStatus
+        : byStatus.filter(
+            (task) => (task.category.trim() || "General") === categoryFilter
+          );
 
     // Category sort takes precedence when active. Group by main category, then
     // by sub-category so related jobs cluster together as you scroll.
@@ -1873,7 +1883,18 @@ export default function BoardPage() {
       const diff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
       return sortDirection === "desc" ? diff : -diff;
     });
-  }, [tasks, statusFilter, sortDirection, categorySort]);
+  }, [tasks, statusFilter, categoryFilter, sortDirection, categorySort]);
+
+  // Category options for the filter dropdown: every managed column plus any
+  // orphan category present on a task but not yet in the managed list.
+  const categoryOptions = useMemo<string[]>(() => {
+    const names = [...categories];
+    for (const task of tasks) {
+      const key = task.category.trim() || "General";
+      if (!names.includes(key)) names.push(key);
+    }
+    return names;
+  }, [categories, tasks]);
 
   // Group the visible tasks by master category for the grouped-board layout.
   // Columns come from the managed `categories` list (so empty ones persist),
@@ -2093,7 +2114,7 @@ export default function BoardPage() {
             </h1>
             <p className="mt-2 text-sm text-[var(--c-dim)]">
               {visibleTasks.length}
-              {statusFilter === "all"
+              {statusFilter === "all" && categoryFilter === "all"
                 ? ` ${visibleTasks.length === 1 ? "task" : "tasks"}`
                 : ` of ${tasks.length} shown`}{" "}
               ·{" "}
@@ -2121,6 +2142,31 @@ export default function BoardPage() {
                     </SelectItem>
                   )
                 )}
+              </SelectContent>
+            </Select>
+
+            {/* Filter the board down to one main job category. */}
+            <Select
+              value={categoryFilter}
+              onValueChange={(value) => setCategoryFilter(value ?? "all")}
+            >
+              <SelectTrigger
+                className={cn(
+                  "h-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)]",
+                  categoryFilter !== "all" &&
+                    "border-[#a35d4d]/30 bg-[var(--c-beige-2)] text-[#a35d4d]"
+                )}
+              >
+                <Tags className="size-4 text-[var(--c-dim)]" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {categoryOptions.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
 
@@ -2230,7 +2276,9 @@ export default function BoardPage() {
           })}
         </div>
 
-        {statusFilter !== "all" && visibleTasks.length === 0 && tasks.length > 0 ? (
+        {(statusFilter !== "all" || categoryFilter !== "all") &&
+        visibleTasks.length === 0 &&
+        tasks.length > 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-14 text-center text-sm text-[var(--c-dim)]">
             No tasks match this filter.
           </div>

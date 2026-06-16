@@ -21,8 +21,10 @@ import {
   CalendarPlus,
   Check,
   CheckCheck,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ListChecks,
   ListTodo,
   Plus,
   RefreshCw,
@@ -36,10 +38,12 @@ import {
   useProdStore,
   resolveDailyPlan,
   suggestFocusCandidates,
+  computeSubtaskRollups,
   countActiveTodayTasks,
   todayKey,
   MAX_TODAY_TASKS,
   type Recurrence,
+  type Subtask,
   type Task,
   type TaskPriority,
 } from "@/store/use-prod-store";
@@ -84,6 +88,71 @@ function planReason(task: Task, today: string): string {
   return "From your backlog";
 }
 
+/** Left-indent a micro-task row by its outline depth. */
+const SUBTASK_INDENT: Record<Subtask["level"], string> = {
+  L1: "",
+  L2: "ml-5",
+  L3: "ml-10",
+};
+
+/** Inline micro-task checklist shown when a focus card is expanded. */
+function MicroTaskList({ task }: { task: Task }) {
+  const toggleSubtaskComplete = useProdStore((s) => s.toggleSubtaskComplete);
+  const rollups = computeSubtaskRollups(task.subtasks);
+
+  return (
+    <div className="mt-2.5 flex flex-col gap-1 border-t border-[var(--c-line)] pt-2.5">
+      {task.subtasks.map((sub) => {
+        const checked = sub.status === "done" || sub.status === "cancelled";
+        const roll = rollups[sub.id];
+        const partial = !checked && roll?.editable && roll.percent > 0;
+        return (
+          <div
+            key={sub.id}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-1.5 py-1",
+              SUBTASK_INDENT[sub.level]
+            )}
+          >
+            <button
+              type="button"
+              onClick={() => toggleSubtaskComplete(task.id, sub.id)}
+              title={checked ? "Mark not done" : "Mark done"}
+              aria-label={checked ? "Mark not done" : "Mark done"}
+              className={cn(
+                "flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                checked
+                  ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
+                  : "border-[var(--c-line-strong)] text-transparent hover:border-[#6f9e6a]"
+              )}
+            >
+              <Check className="size-3" strokeWidth={3} />
+            </button>
+            <span className="shrink-0 rounded bg-[var(--c-beige-2)] px-1 text-[10px] font-semibold text-[var(--c-faint)]">
+              {sub.level}
+            </span>
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-[13px]",
+                checked
+                  ? "text-[var(--c-faint)] line-through"
+                  : "text-[var(--c-ink-3)]"
+              )}
+            >
+              {sub.title || "Untitled step"}
+            </span>
+            {partial && (
+              <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--c-dim)]">
+                {roll.percent}%
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function PlanCard({
   task,
   today,
@@ -98,150 +167,44 @@ function PlanCard({
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
   const reason = planReason(task, today);
+  const subtasks = task.subtasks ?? [];
+  const hasSteps = subtasks.length > 0;
+  const stepsDone = subtasks.filter(
+    (s) => s.status === "done" || s.status === "cancelled"
+  ).length;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)] transition-all",
+        "rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)] transition-all",
         done && "opacity-55"
       )}
     >
-      <button
-        type="button"
-        onClick={() => onComplete(task.id)}
-        disabled={done}
-        title={done ? "Completed" : "Mark complete"}
-        aria-label={done ? "Completed" : "Mark complete"}
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors",
-          done
-            ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
-            : "border-[var(--c-line-strong)] text-transparent hover:border-[#6f9e6a] hover:text-[#6f9e6a]/40"
-        )}
-      >
-        <Check className="size-4" strokeWidth={3} />
-      </button>
-
-      <div className="min-w-0 flex-1">
-        <p
-          className={cn(
-            "truncate text-[15px] font-medium",
-            done ? "text-[var(--c-dim)] line-through" : "text-[var(--c-ink-2)]"
-          )}
-        >
-          {task.title || "Untitled task"}
-        </p>
-        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-[var(--c-dim)]">
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium",
-              reason === "Overdue"
-                ? "bg-[#f6dada] text-[#9b3b3b]"
-                : reason === "Due today"
-                  ? "bg-[#f6e6da] text-[#a35d4d]"
-                  : "bg-[var(--c-beige-2)] text-[var(--c-dim)]"
-            )}
-          >
-            {reason}
-          </span>
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium",
-              PRIORITY_PILL[task.priority]
-            )}
-          >
-            {task.priority}
-          </span>
-          {task.recurrence !== "none" && (
-            <span className="inline-flex items-center gap-1 text-[var(--c-faint)]">
-              <Repeat className="size-3" />
-            </span>
-          )}
-          {deadline && reason !== "Due today" && reason !== "Overdue" && (
-            <span className="inline-flex items-center gap-1">
-              <CalendarDays className="size-3 text-[var(--c-faint)]" />
-              {deadline}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {!done && (
+      <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => onRemove(task.id)}
-          title="Remove from today's focus"
-          aria-label="Remove from today's focus"
-          className="flex size-7 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#9b3b3b]"
+          onClick={() => onComplete(task.id)}
+          disabled={done}
+          title={done ? "Completed" : "Mark complete"}
+          aria-label={done ? "Completed" : "Mark complete"}
+          className={cn(
+            "flex size-8 shrink-0 items-center justify-center rounded-full border transition-colors",
+            done
+              ? "border-[#6f9e6a] bg-[#6f9e6a] text-white"
+              : "border-[var(--c-line-strong)] text-transparent hover:border-[#6f9e6a] hover:text-[#6f9e6a]/40"
+          )}
         >
-          <X className="size-4" />
+          <Check className="size-4" strokeWidth={3} />
         </button>
-      )}
-    </div>
-  );
-}
 
-/**
- * Opt-in nudge: surfaces one ranked suggestion (overdue > due today >
- * priority) the user hasn't pulled into focus yet. "Add to focus" sends it to
- * today; "Refresh" cycles to the next candidate. Nothing is added automatically.
- */
-function SuggestionCard({
-  tasks,
-  today,
-}: {
-  tasks: Task[];
-  today: string;
-}) {
-  const sendTaskToToday = useProdStore((s) => s.sendTaskToToday);
-  const [cursor, setCursor] = useState(0);
-  const [full, setFull] = useState(false);
-
-  const candidates = useMemo(
-    () => suggestFocusCandidates(tasks, today),
-    [tasks, today]
-  );
-  const focusFull = countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS;
-
-  if (candidates.length === 0) return null;
-
-  const task = candidates[cursor % candidates.length];
-  const reason = planReason(task, today);
-  const deadline = formatDeadline(task.deadline);
-
-  const handleAdd = () => {
-    const ok = sendTaskToToday(task.id);
-    if (!ok) {
-      setFull(true);
-      return;
-    }
-    setFull(false);
-    setCursor(0);
-  };
-
-  return (
-    <section className="rounded-2xl border border-[#ecd9c8] bg-gradient-to-br from-[#fbf1e7] to-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-wide text-[#a35d4d] uppercase">
-          <Sparkles className="size-4" />
-          Suggested next
-        </h2>
-        {candidates.length > 1 && (
-          <button
-            type="button"
-            onClick={() => setCursor((c) => c + 1)}
-            title="Show another suggestion"
-            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel)] px-3 py-1.5 text-[12px] font-medium text-[var(--c-dim)] transition-colors hover:border-[#e4c4a8] hover:text-[#a35d4d]"
-          >
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </button>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-medium text-[var(--c-ink-2)]">
+          <p
+            className={cn(
+              "truncate text-[15px] font-medium",
+              done ? "text-[var(--c-dim)] line-through" : "text-[var(--c-ink-2)]"
+            )}
+          >
             {task.title || "Untitled task"}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-[var(--c-dim)]">
@@ -265,34 +228,201 @@ function SuggestionCard({
             >
               {task.priority}
             </span>
+            {task.recurrence !== "none" && (
+              <span className="inline-flex items-center gap-1 text-[var(--c-faint)]">
+                <Repeat className="size-3" />
+              </span>
+            )}
             {deadline && reason !== "Due today" && reason !== "Overdue" && (
               <span className="inline-flex items-center gap-1">
                 <CalendarDays className="size-3 text-[var(--c-faint)]" />
                 {deadline}
               </span>
             )}
+            {hasSteps && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                aria-expanded={expanded}
+                className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+              >
+                <ListChecks className="size-3" />
+                <span className="tabular-nums">
+                  {stepsDone}/{subtasks.length}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "size-3 transition-transform",
+                    expanded && "rotate-180"
+                  )}
+                />
+              </button>
+            )}
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleAdd}
-          disabled={focusFull}
-          title={
-            focusFull
-              ? `Today's focus is full (max ${MAX_TODAY_TASKS})`
-              : "Add to today's focus"
-          }
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-2 text-[13px] font-medium transition-colors",
-            focusFull
-              ? "cursor-not-allowed bg-[var(--c-beige-2)] text-[var(--c-faint)]"
-              : "bg-[#a35d4d] text-white hover:bg-[#925040]"
+        {!done && (
+          <button
+            type="button"
+            onClick={() => onRemove(task.id)}
+            title="Remove from today's focus"
+            aria-label="Remove from today's focus"
+            className="flex size-7 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#9b3b3b]"
+          >
+            <X className="size-4" />
+          </button>
+        )}
+      </div>
+
+      {hasSteps && expanded && <MicroTaskList task={task} />}
+    </div>
+  );
+}
+
+/** One suggestion row inside the "Suggested next" card. */
+function SuggestionRow({
+  task,
+  today,
+  focusFull,
+  onAdd,
+}: {
+  task: Task;
+  today: string;
+  focusFull: boolean;
+  onAdd: (id: string) => void;
+}) {
+  const reason = planReason(task, today);
+  const deadline = formatDeadline(task.deadline);
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-[var(--c-line)] bg-[var(--c-panel)] p-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[14.5px] font-medium text-[var(--c-ink-2)]">
+          {task.title || "Untitled task"}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-[var(--c-dim)]">
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              reason === "Overdue"
+                ? "bg-[#f6dada] text-[#9b3b3b]"
+                : reason === "Due today"
+                  ? "bg-[#f6e6da] text-[#a35d4d]"
+                  : "bg-[var(--c-beige-2)] text-[var(--c-dim)]"
+            )}
+          >
+            {reason}
+          </span>
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              PRIORITY_PILL[task.priority]
+            )}
+          >
+            {task.priority}
+          </span>
+          {deadline && reason !== "Due today" && reason !== "Overdue" && (
+            <span className="inline-flex items-center gap-1">
+              <CalendarDays className="size-3 text-[var(--c-faint)]" />
+              {deadline}
+            </span>
           )}
-        >
-          <Plus className="size-4" />
-          Add to focus
-        </button>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onAdd(task.id)}
+        disabled={focusFull}
+        title={
+          focusFull
+            ? `Today's focus is full (max ${MAX_TODAY_TASKS})`
+            : "Add to today's focus"
+        }
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+          focusFull
+            ? "cursor-not-allowed bg-[var(--c-beige-2)] text-[var(--c-faint)]"
+            : "bg-[#a35d4d] text-white hover:bg-[#925040]"
+        )}
+      >
+        <Plus className="size-3.5" />
+        Add
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Opt-in nudge: surfaces up to three ranked suggestions (overdue > due today >
+ * priority) the user hasn't pulled into focus yet. Each has its own "Add"
+ * action; "Refresh" rotates to the next batch. Nothing is added automatically.
+ */
+function SuggestionCard({
+  tasks,
+  today,
+}: {
+  tasks: Task[];
+  today: string;
+}) {
+  const sendTaskToToday = useProdStore((s) => s.sendTaskToToday);
+  const [offset, setOffset] = useState(0);
+  const [full, setFull] = useState(false);
+
+  const candidates = useMemo(
+    () => suggestFocusCandidates(tasks, today),
+    [tasks, today]
+  );
+  const focusFull = countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS;
+
+  if (candidates.length === 0) return null;
+
+  // Show up to three, rotating from `offset` when there are more than three.
+  const count = Math.min(3, candidates.length);
+  const batch =
+    candidates.length <= 3
+      ? candidates
+      : Array.from(
+          { length: count },
+          (_, i) => candidates[(offset + i) % candidates.length]
+        );
+
+  const handleAdd = (id: string) => {
+    const ok = sendTaskToToday(id);
+    if (!ok) setFull(true);
+    else setFull(false);
+  };
+
+  return (
+    <section className="rounded-2xl border border-[#ecd9c8] bg-gradient-to-br from-[#fbf1e7] to-[var(--c-panel)] p-4 shadow-[0_1px_4px_rgba(74,64,54,0.05)]">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-[13px] font-semibold tracking-wide text-[#a35d4d] uppercase">
+          <Sparkles className="size-4" />
+          Suggested next
+        </h2>
+        {candidates.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setOffset((o) => (o + 3) % candidates.length)}
+            title="Show another batch of suggestions"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel)] px-3 py-1.5 text-[12px] font-medium text-[var(--c-dim)] transition-colors hover:border-[#e4c4a8] hover:text-[#a35d4d]"
+          >
+            <RefreshCw className="size-3.5" />
+            Refresh
+          </button>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2">
+        {batch.map((task) => (
+          <SuggestionRow
+            key={task.id}
+            task={task}
+            today={today}
+            focusFull={focusFull}
+            onAdd={handleAdd}
+          />
+        ))}
       </div>
 
       {(focusFull || full) && (
