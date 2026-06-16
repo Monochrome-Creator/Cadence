@@ -1055,6 +1055,91 @@ function GoalSelect({
   );
 }
 
+/** Sentinel option that switches the category picker into "type a new one" mode. */
+const NEW_CATEGORY_VALUE = "__new_category__";
+
+/**
+ * Category selector for a task. Picking from the dropdown reassigns the task to
+ * an existing category; choosing "New category…" reveals an inline field, so a
+ * brand-new category is only ever created on an explicit, complete entry —
+ * never letter-by-letter the way the old free-text field did (which spawned a
+ * stray "B", "Bu", "Bus"… column on every keystroke).
+ */
+function CategoryPicker({
+  value,
+  options,
+  theme,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  theme: CategoryTheme;
+  onChange: (category: string) => void;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  if (creating) {
+    const commit = () => {
+      const name = draft.trim();
+      setCreating(false);
+      setDraft("");
+      if (name) onChange(name);
+    };
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            setCreating(false);
+            setDraft("");
+          }
+        }}
+        onBlur={commit}
+        placeholder="New category"
+        aria-label="New category name"
+        className={cn(
+          "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[var(--c-faint)] focus:ring-2 focus:ring-[#a35d4d]/25 xl:col-auto xl:w-full xl:py-1",
+          theme.pill
+        )}
+      />
+    );
+  }
+
+  return (
+    <Select
+      value={value || undefined}
+      onValueChange={(next) => {
+        if (next === NEW_CATEGORY_VALUE) {
+          setCreating(true);
+          return;
+        }
+        if (next) onChange(next);
+      }}
+    >
+      <SelectTrigger
+        aria-label="Task category"
+        className={cn(PILL_TRIGGER, "col-span-2 xl:col-auto", theme.pill)}
+      >
+        <SelectValue placeholder="Category" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((name) => (
+          <SelectItem key={name} value={name}>
+            {name}
+          </SelectItem>
+        ))}
+        <SelectItem value={NEW_CATEGORY_VALUE}>+ New category…</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
 function SortableTaskCard({
   task,
   isActive,
@@ -1068,6 +1153,7 @@ function SortableTaskCard({
   const updateTaskSessions = useProdStore((state) => state.updateTaskSessions);
   const deleteTask = useProdStore((state) => state.deleteTask);
   const addCategory = useProdStore((state) => state.addCategory);
+  const categories = useProdStore((state) => state.categories);
   const setActiveTask = useProdStore((state) => state.setActiveTask);
   const sendTaskToToday = useProdStore((state) => state.sendTaskToToday);
   const returnTaskToInbox = useProdStore((state) => state.returnTaskToInbox);
@@ -1170,6 +1256,15 @@ function SortableTaskCard({
   const fractionTotal = task.subtasks.length;
   // Color-codes the whole card by category for at-a-glance grouping.
   const theme = categoryTheme(task.category);
+
+  // Categories offered in the picker: every managed column plus this task's own
+  // category if it's an orphan not yet in the managed list.
+  const categoryOptions = useMemo(() => {
+    const list = [...categories];
+    const current = task.category.trim();
+    if (current && !list.includes(current)) list.push(current);
+    return list;
+  }, [categories, task.category]);
 
   return (
     <div
@@ -1373,21 +1468,15 @@ function SortableTaskCard({
           </SelectContent>
         </Select>
 
-        {/* Category — free-text, color-coded pill */}
-        <input
+        {/* Category — pick from existing columns, or create a new one explicitly */}
+        <CategoryPicker
           value={task.category}
-          onChange={(e) => updateTask(task.id, { category: e.target.value })}
-          onBlur={(e) => {
-            // Register a typed-in category so its column persists even when empty.
-            const value = e.target.value.trim();
-            if (value) addCategory(value);
+          options={categoryOptions}
+          theme={theme}
+          onChange={(category) => {
+            addCategory(category);
+            updateTask(task.id, { category });
           }}
-          placeholder="Category"
-          aria-label="Task category"
-          className={cn(
-            "col-span-2 h-auto w-full min-w-0 rounded-full border-0 px-3 py-2 text-center text-xs font-medium shadow-none outline-none transition-colors placeholder:text-[var(--c-faint)] focus:ring-2 focus:ring-[#a35d4d]/25 xl:col-auto xl:w-full xl:py-1",
-            theme.pill
-          )}
         />
 
         {/* Deadline (date-fns formatted) — shown inline only in the grid layout;
