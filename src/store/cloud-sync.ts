@@ -257,6 +257,14 @@ async function withAuthRetry<T extends { error: unknown }>(
  * auth event). Never hits the Auth API — RLS enforces auth server-side.
  */
 async function getUserId(supabase: SupabaseClient): Promise<string | null> {
+  // Demo mode is fully sandboxed — never resolve a real account, so every
+  // push/pull no-ops even if the visitor still holds a Supabase session.
+  if (
+    typeof window !== "undefined" &&
+    window.localStorage.getItem("cadence-demo-mode") === "1"
+  ) {
+    return null;
+  }
   if (_cachedUserId) return _cachedUserId;
   const { data } = await supabase.auth.getSession();
   return data.session?.user.id ?? null;

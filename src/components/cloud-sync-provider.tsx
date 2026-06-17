@@ -9,7 +9,12 @@ import {
   withTimeout,
 } from "@/store/cloud-sync";
 import { getSupabaseClient } from "@/utils/supabase/client";
-import { useProdStore } from "@/store/use-prod-store";
+import {
+  DEMO_STORAGE_KEY,
+  IS_DEMO,
+  seedDemoData,
+  useProdStore,
+} from "@/store/use-prod-store";
 
 /**
  * Bootstraps store persistence when the app mounts. Renders nothing.
@@ -31,6 +36,28 @@ export function CloudSyncProvider() {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Demo mode: rehydrate the isolated sample namespace and stop. No auth, no
+    // cloud pull/push — the sandbox never touches a real account.
+    if (IS_DEMO) {
+      void (async () => {
+        const firstRun =
+          typeof localStorage !== "undefined" &&
+          localStorage.getItem(DEMO_STORAGE_KEY) === null;
+        await useProdStore.persist.rehydrate();
+        if (cancelled) return;
+        if (firstRun) seedDemoData();
+        useProdStore.setState({
+          isHydrated: true,
+          cloudEnabled: false,
+          connectionStatus: "offline",
+        });
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
+
     let subscription: { unsubscribe: () => void } | null = null;
 
     /**

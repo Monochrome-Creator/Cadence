@@ -33,6 +33,39 @@ import {
   type SyncOutcome,
 } from "./cloud-sync";
 
+/* -------------------------------- demo mode ------------------------------- */
+
+/**
+ * Demo mode lets a visitor explore Cadence with a throwaway sample workspace
+ * that is fully isolated from any signed-in account:
+ *   - the store persists to a separate localStorage namespace (`cadence-demo`),
+ *   - cloud sync is disabled (CloudSyncProvider short-circuits, and the cloud
+ *     layer's getUserId() refuses to resolve a user while the flag is set),
+ * so demo edits never read or write the real user's data.
+ *
+ * The flag is read synchronously at module load (client only) and only flips
+ * across a full document load, which enterDemo()/exitDemo() force.
+ */
+export const DEMO_FLAG_KEY = "cadence-demo-mode";
+export const DEMO_STORAGE_KEY = "cadence-demo";
+
+export const IS_DEMO =
+  typeof window !== "undefined" &&
+  window.localStorage.getItem(DEMO_FLAG_KEY) === "1";
+
+export function enterDemo(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(DEMO_FLAG_KEY, "1");
+  // Hard navigation so the store module re-initialises in its demo namespace.
+  window.location.assign("/");
+}
+
+export function exitDemo(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(DEMO_FLAG_KEY);
+  window.location.assign("/login");
+}
+
 export const TASK_STATUSES = [
   "Working on it",
   "Stuck",
@@ -895,6 +928,94 @@ const initialTasks: Task[] = [
 
 /** Seed columns: the canonical buckets the demo tasks live in. */
 const initialCategories = ["Work", "Learning", "General"];
+
+/** Sample workspace for demo mode — a fictional indie maker's board, distinct
+ *  from the default seed so the sandbox reads as someone else's account. */
+const demoCategories = ["Studio", "Side Project", "Life"];
+
+const demoTasks: Task[] = [
+  {
+    id: "demo-1",
+    title: "Storyboard the launch trailer",
+    status: "Working on it",
+    priority: "High",
+    deadline: "2026-06-22",
+    category: "Studio",
+    subcategory: "Video",
+    recurrence: "none",
+    pomodorosLogged: 2,
+    order: 0,
+    subtasks: [
+      { id: "demo-1a", title: "Write the script", status: "done", level: "L1" },
+      { id: "demo-1b", title: "Sketch key frames", status: "todo", level: "L1" },
+    ],
+  },
+  {
+    id: "demo-2",
+    title: "Record demo voiceover",
+    status: "Not Started",
+    priority: "Medium",
+    deadline: "2026-06-24",
+    category: "Studio",
+    subcategory: "Audio",
+    recurrence: "none",
+    pomodorosLogged: 0,
+    order: 1,
+    subtasks: [],
+  },
+  {
+    id: "demo-3",
+    title: "Set up the landing-page waitlist",
+    status: "Stuck",
+    priority: "Critical",
+    deadline: "2026-06-20",
+    category: "Side Project",
+    subcategory: "Growth",
+    recurrence: "none",
+    pomodorosLogged: 3,
+    order: 2,
+    subtasks: [],
+  },
+  {
+    id: "demo-4",
+    title: "Reply to beta tester feedback",
+    status: "Working on it",
+    priority: "Medium",
+    deadline: "2026-06-19",
+    category: "Side Project",
+    subcategory: "Support",
+    recurrence: "weekly",
+    pomodorosLogged: 1,
+    order: 3,
+    subtasks: [],
+  },
+  {
+    id: "demo-5",
+    title: "Plan weekend hiking trip",
+    status: "Not Started",
+    priority: "Low",
+    deadline: "2026-06-26",
+    category: "Life",
+    subcategory: "",
+    recurrence: "none",
+    pomodorosLogged: 0,
+    order: 4,
+    subtasks: [],
+  },
+  {
+    id: "demo-6",
+    title: "Meal prep for the week",
+    status: "Done",
+    priority: "Low",
+    deadline: "2026-06-15",
+    category: "Life",
+    subcategory: "",
+    recurrence: "weekly",
+    pomodorosLogged: 2,
+    order: 5,
+    subtasks: [],
+  },
+];
 
 /**
  * Distinct categories present on the given tasks, in first-seen order, always
@@ -1908,7 +2029,7 @@ export const useProdStore = create<ProdState>()(
   },
     }),
     {
-      name: "cadence-store",
+      name: IS_DEMO ? DEMO_STORAGE_KEY : "cadence-store",
       version: 1,
       storage: createJSONStorage(() => localStorage),
       // The first client render must match the server's (seed) render, so we
@@ -1929,3 +2050,18 @@ export const useProdStore = create<ProdState>()(
     }
   )
 );
+
+/** Replace the live store with the demo workspace. Called once on first entry
+ *  into demo mode (when the `cadence-demo` namespace is still empty). */
+export function seedDemoData(): void {
+  useProdStore.setState({
+    tasks: demoTasks,
+    categories: demoCategories,
+    goals: [],
+    flashcards: [],
+    history: {},
+    dailyPlan: null,
+    pendingReview: null,
+    activeTaskId: null,
+  });
+}

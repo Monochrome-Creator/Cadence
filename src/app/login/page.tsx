@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, Mail, Sparkles } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 
 import { getSupabaseClient, isSupabaseConfigured } from "@/utils/supabase/client";
+import { enterDemo } from "@/store/use-prod-store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +24,6 @@ export default function LoginPage() {
   const router = useRouter();
 
   const [mode, setMode] = useState<Mode>("signin");
-  const [useMagicLink, setUseMagicLink] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -66,19 +66,6 @@ export default function LoginPage() {
       const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(
         nextPath
       )}`;
-
-      if (useMagicLink) {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo, shouldCreateUser: true },
-        });
-        if (error) throw error;
-        setFeedback({
-          tone: "success",
-          text: `We've sent a magic link to ${email}. Check your inbox to continue.`,
-        });
-        return;
-      }
 
       if (mode === "signup") {
         const { data, error } = await supabase.auth.signUp({
@@ -160,28 +147,26 @@ export default function LoginPage() {
               />
             </div>
 
-            {!useMagicLink && (
-              <div className="space-y-1.5">
-                <label
-                  htmlFor="password"
-                  className="px-1 text-xs font-semibold tracking-wide text-[var(--c-dim)] uppercase"
-                >
-                  Password
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  required={!useMagicLink}
-                  autoComplete={
-                    mode === "signin" ? "current-password" : "new-password"
-                  }
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="h-11 border-[var(--c-line-strong)] bg-[var(--c-panel)] text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
-                />
-              </div>
-            )}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="password"
+                className="px-1 text-xs font-semibold tracking-wide text-[var(--c-dim)] uppercase"
+              >
+                Password
+              </label>
+              <Input
+                id="password"
+                type="password"
+                required
+                autoComplete={
+                  mode === "signin" ? "current-password" : "new-password"
+                }
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="h-11 border-[var(--c-line-strong)] bg-[var(--c-panel)] text-[var(--c-ink-2)] shadow-none focus-visible:border-[#a35d4d]"
+              />
+            </div>
 
             {feedback && (
               <p
@@ -203,10 +188,6 @@ export default function LoginPage() {
             >
               {loading ? (
                 <Loader2 className="size-4 animate-spin" />
-              ) : useMagicLink ? (
-                <>
-                  <Mail className="size-4" /> Send magic link
-                </>
               ) : mode === "signin" ? (
                 "Sign in"
               ) : (
@@ -215,20 +196,23 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          {/* Magic-link toggle */}
-          <button
+          {/* Demo entry — no account needed */}
+          <div className="mt-5 flex items-center gap-3">
+            <span className="h-px flex-1 bg-[var(--c-line)]" />
+            <span className="text-xs text-[var(--c-faint)]">or</span>
+            <span className="h-px flex-1 bg-[var(--c-line)]" />
+          </div>
+          <Button
             type="button"
-            onClick={() => {
-              setUseMagicLink((v) => !v);
-              setFeedback(null);
-            }}
-            className="mt-4 flex w-full items-center justify-center gap-1.5 text-sm font-medium text-[#a35d4d] transition-colors hover:text-[#8f4f41]"
+            variant="outline"
+            onClick={() => enterDemo()}
+            className="mt-4 h-11 w-full border-[var(--c-line-strong)] bg-[var(--c-panel)] text-[var(--c-ink-2)] hover:bg-[var(--c-beige)]"
           >
-            <Sparkles className="size-3.5" />
-            {useMagicLink
-              ? "Use a password instead"
-              : "Email me a magic link instead"}
-          </button>
+            <Play className="size-4" /> Explore the demo
+          </Button>
+          <p className="mt-2 text-center text-xs text-[var(--c-faint)]">
+            No account needed — jump straight into a sample board.
+          </p>
         </div>
 
         {/* Mode switch */}
