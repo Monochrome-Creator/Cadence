@@ -192,6 +192,12 @@ export function Sidebar() {
     if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true") setCollapsed(true);
   }, []);
 
+  // Mirror the collapsed state onto <html> so content areas (e.g. the board)
+  // can reclaim the freed width via CSS without prop-drilling through layout.
+  useEffect(() => {
+    document.documentElement.classList.toggle("sidebar-collapsed", collapsed);
+  }, [collapsed]);
+
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
       const next = !prev;

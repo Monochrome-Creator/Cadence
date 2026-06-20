@@ -179,6 +179,13 @@
   }
 }
 
+/* When the sidebar is minimized, let the board canvas use the full freed width
+   instead of staying capped at its comfortable reading width. The class is
+   toggled on <html> by the Sidebar component. */
+html.sidebar-collapsed .board-canvas {
+  max-width: none;
+}
+
 /* Toast entrance — slides up and fades in from below. */
 @keyframes toast-in {
   from {

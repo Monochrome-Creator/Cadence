@@ -270,9 +270,10 @@ const BOARD_ZOOM_STORAGE_KEY = "cadence:boardZoom";
 const BOARD_ZOOM_MIN = 0.5;
 const BOARD_ZOOM_MAX = 1.1;
 const BOARD_ZOOM_STEP = 0.1;
-/** Round to one decimal so float drift never escapes the [MIN, MAX] clamp. */
+/** Round to two decimals (1% steps) so pinch/wheel zoom feels smooth while
+ *  float drift still can't escape the [MIN, MAX] clamp. */
 function clampZoom(value: number): number {
-  return Math.round(Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value)) * 10) / 10;
+  return Math.round(Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value)) * 100) / 100;
 }
 
 const BOARD_LAYOUTS: {
@@ -2006,6 +2007,29 @@ export default function BoardPage() {
     localStorage.setItem(TASK_COL_STORAGE_KEY, String(taskColWidth));
   }, [taskColWidth]);
 
+  // Trackpad pinch / Ctrl(⌘)+wheel zoom over the board. A native non-passive
+  // listener is required so we can preventDefault the browser's page zoom
+  // (React's onWheel is passive and can't). Plain scrolling is untouched.
+  useEffect(() => {
+    const root = boardRef.current;
+    if (!root) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom((prev) => {
+        const next = clampZoom(prev - e.deltaY * 0.0015);
+        try {
+          localStorage.setItem(BOARD_ZOOM_STORAGE_KEY, String(next));
+        } catch {
+          // Storage disabled: keep the new zoom in memory only.
+        }
+        return next;
+      });
+    };
+    root.addEventListener("wheel", onWheel, { passive: false });
+    return () => root.removeEventListener("wheel", onWheel);
+  }, []);
+
   const startColResize = (e: React.PointerEvent<HTMLElement>) => {
     e.preventDefault();
     // The handle's parent is the Task header cell — its width is the current
@@ -2330,7 +2354,7 @@ export default function BoardPage() {
 
   return (
     <div ref={boardRef} className="px-8 py-10">
-      <div className="mx-auto max-w-6xl">
+      <div className="board-canvas mx-auto max-w-6xl">
         <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="font-heading text-3xl font-semibold tracking-tight text-[var(--c-ink-2)] md:text-4xl">
