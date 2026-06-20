@@ -261,6 +261,20 @@ const CATEGORY_SORT_LABELS: Record<CategorySort, string> = {
 type BoardLayout = "stacked" | "collapsible" | "jump" | "columns";
 const BOARD_LAYOUT_STORAGE_KEY = "cadence:boardLayout";
 
+/**
+ * Board zoom (CSS `zoom`) so the whole board can be scaled down to fit more on
+ * screen — fewer columns/cards off the edge means less scrolling. Reflows
+ * layout (columns get narrower) rather than just visually shrinking.
+ */
+const BOARD_ZOOM_STORAGE_KEY = "cadence:boardZoom";
+const BOARD_ZOOM_MIN = 0.5;
+const BOARD_ZOOM_MAX = 1.1;
+const BOARD_ZOOM_STEP = 0.1;
+/** Round to one decimal so float drift never escapes the [MIN, MAX] clamp. */
+function clampZoom(value: number): number {
+  return Math.round(Math.min(BOARD_ZOOM_MAX, Math.max(BOARD_ZOOM_MIN, value)) * 10) / 10;
+}
+
 const BOARD_LAYOUTS: {
   value: BoardLayout;
   label: string;
@@ -1934,6 +1948,27 @@ export default function BoardPage() {
     }
   };
 
+  // Board zoom. Starts at 1 (full size) for a stable first paint, then restores
+  // the saved level after mount (same SSR-hydration reasoning as `layout`).
+  const [zoom, setZoom] = useState(1);
+  useEffect(() => {
+    const saved = Number(localStorage.getItem(BOARD_ZOOM_STORAGE_KEY));
+    if (saved && saved !== 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore of the persisted zoom after mount
+      setZoom(clampZoom(saved));
+    }
+  }, []);
+
+  const changeZoom = (next: number) => {
+    const clamped = clampZoom(next);
+    setZoom(clamped);
+    try {
+      localStorage.setItem(BOARD_ZOOM_STORAGE_KEY, String(clamped));
+    } catch {
+      // Private-mode / storage-disabled: keep the choice in memory only.
+    }
+  };
+
   const toggleSectionCollapse = (category: string) =>
     setCollapsedSections((prev) => {
       const next = new Set(prev);
@@ -2472,8 +2507,41 @@ export default function BoardPage() {
             );
           })}
 
-          {/* Layout switcher — choose how the board is laid out for viewing. */}
+          {/* Zoom control — scale the board down to fit more on screen. */}
           <div className="ml-auto flex items-center gap-0.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-1">
+            <button
+              type="button"
+              onClick={() => changeZoom(zoom - BOARD_ZOOM_STEP)}
+              disabled={zoom <= BOARD_ZOOM_MIN}
+              title="Zoom out"
+              aria-label="Zoom out"
+              className="flex size-7 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:text-[#a35d4d] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Minus className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => changeZoom(1)}
+              title="Reset zoom"
+              aria-label="Reset zoom to 100%"
+              className="min-w-[42px] rounded-full px-1 text-center text-xs font-medium tabular-nums text-[var(--c-ink-3)] transition-colors hover:text-[#a35d4d]"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() => changeZoom(zoom + BOARD_ZOOM_STEP)}
+              disabled={zoom >= BOARD_ZOOM_MAX}
+              title="Zoom in"
+              aria-label="Zoom in"
+              className="flex size-7 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:text-[#a35d4d] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus className="size-4" />
+            </button>
+          </div>
+
+          {/* Layout switcher — choose how the board is laid out for viewing. */}
+          <div className="flex items-center gap-0.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-1">
             {BOARD_LAYOUTS.map(({ value, label, icon: Icon }) => {
               const active = layout === value;
               return (
@@ -2544,6 +2612,7 @@ export default function BoardPage() {
               strategy={verticalListSortingStrategy}
             >
             <div
+              style={zoom !== 1 ? { zoom } : undefined}
               className={cn(
                 layout === "columns"
                   ? "flex items-start gap-6 overflow-x-auto pb-4"
