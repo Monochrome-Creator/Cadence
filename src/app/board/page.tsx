@@ -33,11 +33,15 @@ import {
   CalendarPlus,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  Columns3,
+  Compass,
   CornerDownRight,
   FolderPlus,
   GripVertical,
   HelpCircle,
   Inbox,
+  LayoutList,
   ListFilter,
   Minus,
   Pencil,
@@ -100,6 +104,7 @@ const PRIORITY_ORDER: Record<TaskPriority, number> = {
 /** Muted, sophisticated pill palettes (soft background + deep text). */
 const STATUS_PILL: Record<TaskStatus, string> = {
   "Working on it": "bg-[#f3e7d0] text-[#8a6d3b]",
+  "On-Going": "bg-[#dfeaf0] text-[#3f6d88]",
   Stuck: "bg-[#f6e0e0] text-[#9b3b3b]",
   Done: "bg-[#e3ece0] text-[#4d7049]",
   "Not Started": "bg-[#efe9e0] text-[#8a7d6b]",
@@ -233,7 +238,8 @@ type StatusFilter = TaskStatus | "all";
  */
 const STATUS_FILTER_PILLS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All Active" },
-  { value: "Working on it", label: "Working on it" },
+  { value: "Working on it", label: "Working On It" },
+  { value: "On-Going", label: "On-Going" },
   { value: "Stuck", label: "Stuck" },
   { value: "Not Started", label: "Not Started" },
 ];
@@ -243,6 +249,28 @@ const CATEGORY_SORT_LABELS: Record<CategorySort, string> = {
   asc: "Category A–Z",
   desc: "Category Z–A",
 };
+
+/**
+ * Board layout modes the user can switch between (persisted in localStorage).
+ *  - stacked:     the default full-width vertical list of category sections.
+ *  - collapsible: same vertical list, but each section can fold to its header
+ *                 so the whole board fits on one screen at a glance.
+ *  - jump:        a sticky bar of category chips that scroll-jumps to a section.
+ *  - columns:     side-by-side category columns scrolled horizontally (kanban).
+ */
+type BoardLayout = "stacked" | "collapsible" | "jump" | "columns";
+const BOARD_LAYOUT_STORAGE_KEY = "cadence:boardLayout";
+
+const BOARD_LAYOUTS: {
+  value: BoardLayout;
+  label: string;
+  icon: typeof LayoutList;
+}[] = [
+  { value: "stacked", label: "Stacked", icon: LayoutList },
+  { value: "collapsible", label: "Collapse", icon: ChevronsDownUp },
+  { value: "jump", label: "Jump", icon: Compass },
+  { value: "columns", label: "Columns", icon: Columns3 },
+];
 
 /* -------------------------------------------------------------------------- */
 /*                              Deadline helpers                              */
@@ -1144,10 +1172,13 @@ function SortableTaskCard({
   task,
   isActive,
   dragEnabled,
+  compact = false,
 }: {
   task: Task;
   isActive: boolean;
   dragEnabled: boolean;
+  /** Force the narrow stacked card layout (used inside the Columns view). */
+  compact?: boolean;
 }) {
   const updateTask = useProdStore((state) => state.updateTask);
   const updateTaskSessions = useProdStore((state) => state.updateTaskSessions);
@@ -1286,8 +1317,11 @@ function SortableTaskCard({
           there's room for it without crushing the title. */}
       <div
         className={cn(
-          "flex flex-col gap-3 p-4 xl:grid xl:items-center xl:gap-3",
-          GRID_COLS
+          "flex flex-col gap-3 p-4",
+          // In the Columns view the card sits in a narrow track, so it always
+          // uses the stacked form instead of the wide xl grid.
+          !compact && "xl:grid xl:items-center xl:gap-3",
+          !compact && GRID_COLS
         )}
       >
         {/* Task header. On phones the title stays first, then Focus and Complete
@@ -1429,7 +1463,12 @@ function SortableTaskCard({
             (Status | Priority, full-width Category, Sessions | Actions);
             flattened into the wide-screen grid columns via display:contents
             (xl:contents), so these base grid classes never affect that layout. */}
-        <div className="grid grid-cols-2 items-center gap-2 xl:contents">
+        <div
+          className={cn(
+            "grid grid-cols-2 items-center gap-2",
+            !compact && "xl:contents"
+          )}
+        >
           {/* Status pill */}
           <Select
           value={task.status}
@@ -1697,10 +1736,12 @@ function TaskDragOverlayCard({ task }: { task: Task }) {
 function SortableCategorySection({
   id,
   dragEnabled,
+  className,
   children,
 }: {
   id: string;
   dragEnabled: boolean;
+  className?: string;
   children: (dragHandleProps: React.HTMLAttributes<HTMLElement>) => ReactNode;
 }) {
   const {
@@ -1719,7 +1760,7 @@ function SortableCategorySection({
         transform: CSS.Transform.toString(transform),
         transition,
       }}
-      className={cn("relative", isDragging && "opacity-40")}
+      className={cn("relative", isDragging && "opacity-40", className)}
     >
       {children({ ...attributes, ...listeners })}
     </div>
@@ -1798,6 +1839,21 @@ function resolveDropCategory(over: DragOverEvent["over"]): string | null {
   return typeof containerId === "string" ? containerId : null;
 }
 
+/**
+ * Which category section a drop landed in, when dragging a *section*. The over
+ * target may be the section wrapper itself ("section:{name}"), or — because
+ * closestCorners often resolves to a nested card or empty column — any droppable
+ * inside another section. We map all of these back to a category name so a
+ * section can be dropped onto another section's body (including the top/bottom
+ * sections) and still reorder, instead of silently failing.
+ */
+function resolveOverSection(over: DragOverEvent["over"]): string | null {
+  if (!over) return null;
+  const id = String(over.id);
+  if (id.startsWith("section:")) return id.slice("section:".length);
+  return resolveDropCategory(over);
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                 Board page                                 */
 /* -------------------------------------------------------------------------- */
@@ -1844,6 +1900,52 @@ export default function BoardPage() {
   const [showCompleted, setShowCompleted] = useState(false);
   const [sortDirection, setSortDirection] = useState<SortDirection>("none");
   const [categorySort, setCategorySort] = useState<CategorySort>("none");
+
+  // Board layout mode. Starts on the default "stacked" so the server-rendered
+  // markup is stable, then restores the persisted choice after mount (avoids an
+  // SSR hydration mismatch since the layout drives what gets rendered).
+  const [layout, setLayout] = useState<BoardLayout>("stacked");
+  // Categories the user has folded shut in the Collapse view.
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
+    () => new Set()
+  );
+  // Section elements for the Jump view's scroll-to-section chips.
+  const sectionRefs = useRef<Map<string, HTMLElement | null>>(new Map());
+
+  useEffect(() => {
+    const saved = localStorage.getItem(BOARD_LAYOUT_STORAGE_KEY);
+    if (
+      saved === "stacked" ||
+      saved === "collapsible" ||
+      saved === "jump" ||
+      saved === "columns"
+    ) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore of the persisted layout after mount
+      setLayout(saved);
+    }
+  }, []);
+
+  const changeLayout = (next: BoardLayout) => {
+    setLayout(next);
+    try {
+      localStorage.setItem(BOARD_LAYOUT_STORAGE_KEY, next);
+    } catch {
+      // Private-mode / storage-disabled: keep the choice in memory only.
+    }
+  };
+
+  const toggleSectionCollapse = (category: string) =>
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) next.delete(category);
+      else next.add(category);
+      return next;
+    });
+
+  const jumpToSection = (category: string) =>
+    sectionRefs.current
+      .get(category)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   // Drag-to-resize for the Task column. `null` means "use the responsive
   // default"; once the user drags, the width (px) is mirrored into the
@@ -2076,13 +2178,11 @@ export default function BoardPage() {
       setDraggingCategory(null);
       if (over && active.id !== over.id) {
         const sectionNames = sections.map(([cat]) => cat);
-        const fromIdx = sectionNames.indexOf(
-          String(active.id).replace(/^section:/, "")
-        );
-        const toIdx = sectionNames.indexOf(
-          String(over.id).replace(/^section:/, "")
-        );
-        if (fromIdx !== -1 && toIdx !== -1) {
+        const fromCat = String(active.id).replace(/^section:/, "");
+        const toCat = resolveOverSection(over);
+        const fromIdx = sectionNames.indexOf(fromCat);
+        const toIdx = toCat ? sectionNames.indexOf(toCat) : -1;
+        if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
           reorderCategories(arrayMove(sectionNames, fromIdx, toIdx));
         }
       }
@@ -2363,7 +2463,53 @@ export default function BoardPage() {
               </button>
             );
           })}
+
+          {/* Layout switcher — choose how the board is laid out for viewing. */}
+          <div className="ml-auto flex items-center gap-0.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-1">
+            {BOARD_LAYOUTS.map(({ value, label, icon: Icon }) => {
+              const active = layout === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => changeLayout(value)}
+                  title={`${label} layout`}
+                  aria-label={`${label} layout`}
+                  aria-pressed={active}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                    active
+                      ? "bg-[var(--c-beige-2)] text-[#a35d4d] shadow-[0_1px_2px_rgba(74,64,54,0.08)]"
+                      : "text-[var(--c-dim)] hover:text-[#a35d4d]"
+                  )}
+                >
+                  <Icon className="size-4" />
+                  <span className="hidden md:inline">{label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        {/* Jump bar — sticky category chips that scroll to a section. */}
+        {layout === "jump" && sections.length > 0 && (
+          <div className="sticky top-0 z-20 -mx-1 mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel-soft)]/85 px-3 py-2.5 backdrop-blur">
+            <Compass className="size-4 shrink-0 text-[var(--c-dim)]" />
+            {sections.map(([category, groupTasks]) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => jumpToSection(category)}
+                className="flex items-center gap-1.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel)] px-3 py-1 text-[13px] font-medium text-[var(--c-ink-3)] transition-colors hover:border-[#a35d4d]/30 hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+              >
+                {category}
+                <span className="text-[11px] tabular-nums text-[var(--c-faint)]">
+                  {groupTasks.filter((t) => t.status !== "Done").length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {(statusFilter !== "all" || categoryFilter !== "all") &&
         visibleTasks.length === 0 &&
@@ -2389,18 +2535,32 @@ export default function BoardPage() {
               items={sections.map(([cat]) => `section:${cat}`)}
               strategy={verticalListSortingStrategy}
             >
-            <div className="space-y-12">
+            <div
+              className={cn(
+                layout === "columns"
+                  ? "flex items-start gap-6 overflow-x-auto pb-4"
+                  : "space-y-12"
+              )}
+            >
               {sections.map(([category, groupTasks]) => {
                 // Color-codes the category header pill to match its card spine.
                 const theme = categoryTheme(category);
+                const isColumns = layout === "columns";
+                const isCollapsed =
+                  layout === "collapsible" && collapsedSections.has(category);
                 return (
                   <SortableCategorySection
                     key={category}
                     id={`section:${category}`}
                     dragEnabled={dragEnabled}
+                    className={isColumns ? "w-[340px] shrink-0" : undefined}
                   >
                   {(dragHandleProps) => (
-                  <section>
+                  <section
+                    ref={(el) => {
+                      sectionRefs.current.set(category, el);
+                    }}
+                  >
                     {/* Master category header — bold serif name + count pill,
                         with inline rename + delete (General is protected). */}
                     <div className="group/header mb-4 flex items-center gap-3">
@@ -2414,6 +2574,28 @@ export default function BoardPage() {
                           className="flex size-6 shrink-0 cursor-grab items-center justify-center rounded-md text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-dim)] active:cursor-grabbing"
                         >
                           <GripVertical className="size-4" />
+                        </button>
+                      )}
+                      {/* Collapse / expand toggle — only in the Collapse view. */}
+                      {layout === "collapsible" && (
+                        <button
+                          type="button"
+                          onClick={() => toggleSectionCollapse(category)}
+                          aria-expanded={!isCollapsed}
+                          title={isCollapsed ? "Expand section" : "Collapse section"}
+                          aria-label={
+                            isCollapsed
+                              ? `Expand ${category} section`
+                              : `Collapse ${category} section`
+                          }
+                          className="flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+                        >
+                          <ChevronRight
+                            className={cn(
+                              "size-4 transition-transform duration-200",
+                              !isCollapsed && "rotate-90"
+                            )}
+                          />
                         </button>
                       )}
                       {editingCategory === category ? (
@@ -2470,7 +2652,10 @@ export default function BoardPage() {
                       )}
                     </div>
 
-                    {/* Column labels (md and up) */}
+                    {!isCollapsed && (
+                    <>
+                    {/* Column labels (md+) — hidden in the narrow Columns view. */}
+                    {layout !== "columns" && (
                     <div
                       className={cn(
                         "mb-3 hidden border border-l-4 border-transparent px-4 text-xs font-semibold tracking-wide text-[var(--c-faint)] uppercase xl:grid xl:items-center xl:gap-3",
@@ -2494,6 +2679,7 @@ export default function BoardPage() {
                       <span className="text-center">Sessions</span>
                       <span />
                     </div>
+                    )}
 
                     <SortableContext
                       id={category}
@@ -2504,6 +2690,7 @@ export default function BoardPage() {
                         {groupTasks.length > 0 ? (
                           groupTasks.map((task) => (
                             <SortableTaskCard
+                              compact={isColumns}
                               key={task.id}
                               task={task}
                               isActive={task.id === activeTaskId}
@@ -2577,6 +2764,8 @@ export default function BoardPage() {
                       </button>
                     )}
                   </div>
+                  </>
+                  )}
                   </section>
                   )}
                   </SortableCategorySection>

@@ -68,6 +68,7 @@ export function exitDemo(): void {
 
 export const TASK_STATUSES = [
   "Working on it",
+  "On-Going",
   "Stuck",
   "Done",
   "Not Started",

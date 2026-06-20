@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils";
 
 const STATUS_PILL: Record<TaskStatus, string> = {
   "Working on it": "bg-[#f3e7d0] text-[#8a6d3b]",
+  "On-Going": "bg-[#dfeaf0] text-[#3f6d88]",
   Stuck: "bg-[#f6e0e0] text-[#9b3b3b]",
   Done: "bg-[#e3ece0] text-[#4d7049]",
   "Not Started": "bg-[#efe9e0] text-[#8a7d6b]",

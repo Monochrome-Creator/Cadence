@@ -74,7 +74,7 @@ create table if not exists public.tasks (
   user_id          uuid not null references public.users (id) on delete cascade,
   title            text not null default '',
   status           text not null default 'Not Started'
-                     check (status in ('Working on it', 'Stuck', 'Done', 'Not Started', 'Inbox')),
+                     check (status in ('Working on it', 'On-Going', 'Stuck', 'Done', 'Not Started', 'Inbox')),
   priority         text not null default 'Medium'
                      check (priority in ('Low', 'Medium', 'High', 'Critical')),
   deadline         text not null default '',
@@ -116,12 +116,13 @@ alter table public.tasks
   add constraint tasks_recurrence_check
     check (recurrence in ('none', 'daily', 'weekly', 'monthly', 'quarterly'));
 
--- Existing installs: widen the status check to allow the 'Inbox' holding pen.
+-- Existing installs: widen the status check to allow the 'Inbox' holding pen
+-- and the 'On-Going' status for repeating (daily/weekly/monthly/annual) tasks.
 alter table public.tasks
   drop constraint if exists tasks_status_check;
 alter table public.tasks
   add constraint tasks_status_check
-    check (status in ('Working on it', 'Stuck', 'Done', 'Not Started', 'Inbox'));
+    check (status in ('Working on it', 'On-Going', 'Stuck', 'Done', 'Not Started', 'Inbox'));
 
 -- Existing installs: add the "This Evening" after-hours flag.
 alter table public.tasks
