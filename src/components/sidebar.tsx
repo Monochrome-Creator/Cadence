@@ -224,13 +224,14 @@ export function Sidebar() {
         </span>
         {!collapsed && (
           <div className="min-w-0 flex-1 leading-tight">
-            <span className="font-heading text-2xl font-semibold tracking-tight text-[var(--c-ink-2)]">
+            <span className="block truncate font-heading text-2xl font-semibold tracking-tight text-[var(--c-ink-2)]">
               Cadence
             </span>
-            <p className="text-xs tracking-wide text-[var(--c-dim)]">Your life vault</p>
+            <p className="truncate text-xs tracking-wide text-[var(--c-dim)]">
+              Your life vault
+            </p>
           </div>
         )}
-        <ThemeToggle size={36} />
         <button
           type="button"
           onClick={toggleCollapsed}
@@ -294,6 +295,12 @@ export function Sidebar() {
 
       <div className="pt-3">
         {!collapsed && <TimerWidget />}
+        <div className={cn("mt-3 flex items-center", collapsed ? "justify-center" : "justify-between gap-2 rounded-2xl bg-[var(--c-panel-soft)] px-3 py-2")}>
+          {!collapsed && (
+            <span className="text-xs font-medium text-[var(--c-ink-3)]">Appearance</span>
+          )}
+          <ThemeToggle size={36} />
+        </div>
         <AccountFooter collapsed={collapsed} />
       </div>
     </aside>
