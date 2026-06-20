@@ -2320,7 +2320,11 @@ export default function BoardPage() {
             >
               <SelectTrigger className="h-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)]">
                 <ListFilter className="size-4 text-[var(--c-dim)]" />
-                <SelectValue />
+                <SelectValue>
+                  {(value) =>
+                    value === "all" ? "All Statuses" : (value as string)
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
@@ -2347,7 +2351,11 @@ export default function BoardPage() {
                 )}
               >
                 <Tags className="size-4 text-[var(--c-dim)]" />
-                <SelectValue />
+                <SelectValue>
+                  {(value) =>
+                    value === "all" ? "All Categories" : (value as string)
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
@@ -2425,12 +2433,12 @@ export default function BoardPage() {
             <Button
               variant="outline"
               onClick={() => setDeadlineNudgeOpen(true)}
-              title="Set missing deadlines"
-              aria-label="Set missing deadlines"
+              title="Set Missing Deadlines"
+              aria-label="Set Missing Deadlines"
               className="h-9 min-w-9 gap-2 rounded-full border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 text-sm text-[var(--c-ink-3)] hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
             >
               <CalendarPlus className="size-4" />
-              <span className="hidden sm:inline">Set missing deadlines</span>
+              <span className="hidden sm:inline">Set Missing Deadlines</span>
               {missingDeadlineCount > 0 && (
                 <span className="flex size-5 items-center justify-center rounded-full bg-[#a35d4d] text-[11px] font-semibold text-white">
                   {missingDeadlineCount}

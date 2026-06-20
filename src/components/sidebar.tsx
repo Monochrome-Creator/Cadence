@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
+  ChevronsLeft,
+  ChevronsRight,
   Inbox,
   LayoutDashboard,
   LayoutGrid,
@@ -48,6 +50,9 @@ const MOBILE_NAV_LINKS = [
   { href: "/flashcards", label: "Cards", icon: Layers },
 ];
 
+/** localStorage key remembering whether the desktop sidebar is minimized. */
+const SIDEBAR_COLLAPSED_KEY = "cadence:sidebarCollapsed";
+
 /** Shared active-route check for both desktop and mobile navigation. */
 function isActiveRoute(pathname: string, href: string): boolean {
   return href === "/"
@@ -87,7 +92,7 @@ function countUrgentTasks(tasks: Task[]): number {
  * Shows the signed-in email and a sign-out control. Renders nothing when cloud
  * auth isn't configured or no one is signed in (local-only mode).
  */
-export function AccountFooter() {
+export function AccountFooter({ collapsed = false }: { collapsed?: boolean }) {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
 
@@ -116,10 +121,14 @@ export function AccountFooter() {
     return (
       <Link
         href="/login"
-        className="mt-3 flex items-center gap-2 rounded-2xl bg-[var(--c-panel-soft)] px-3 py-2.5 text-sm font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+        title={collapsed ? "Sign in to sync" : undefined}
+        className={cn(
+          "mt-3 flex items-center rounded-2xl bg-[var(--c-panel-soft)] text-sm font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]",
+          collapsed ? "justify-center p-2.5" : "gap-2 px-3 py-2.5"
+        )}
       >
         <LogIn className="size-4 shrink-0" />
-        Sign in to sync
+        {!collapsed && "Sign in to sync"}
       </Link>
     );
   }
@@ -130,6 +139,21 @@ export function AccountFooter() {
     router.replace("/login");
     router.refresh();
   };
+
+  // Collapsed: just the sign-out icon, centered, with the email in the tooltip.
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={signOut}
+        title={`Signed in as ${email} — sign out`}
+        aria-label="Sign out"
+        className="mt-3 flex w-full items-center justify-center rounded-2xl bg-[var(--c-panel-soft)] p-2.5 text-[var(--c-dim)] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b]"
+      >
+        <LogOut className="size-4" />
+      </button>
+    );
+  }
 
   return (
     <div className="mt-3 flex items-center gap-2 rounded-2xl bg-[var(--c-panel-soft)] px-3 py-2.5">
@@ -159,40 +183,90 @@ export function Sidebar() {
   const tasks = useProdStore((state) => state.tasks);
   const urgentCount = useMemo(() => countUrgentTasks(tasks), [tasks]);
 
+  // Minimize toggle: collapses the sidebar to an icon rail so the main view can
+  // claim the freed width. Defaults expanded for a stable first paint, then
+  // restores the saved preference on mount to avoid an SSR hydration mismatch.
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of persisted layout pref after hydration.
+    if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true") setCollapsed(true);
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next));
+      } catch {
+        // Private-mode storage failures shouldn't break the toggle.
+      }
+      return next;
+    });
+  };
+
   if (isAuthRoute(pathname)) return null;
 
   return (
-    <aside className="mr-3 hidden w-64 shrink-0 flex-col rounded-3xl bg-[var(--c-beige)] p-4 text-[var(--c-ink-2)] shadow-[0_1px_3px_rgba(74,64,54,0.06)] md:flex">
-      <div className="flex items-center gap-3 px-3 py-5">
+    <aside
+      className={cn(
+        "mr-3 hidden shrink-0 flex-col rounded-3xl bg-[var(--c-beige)] text-[var(--c-ink-2)] shadow-[0_1px_3px_rgba(74,64,54,0.06)] md:flex",
+        collapsed ? "w-[72px] p-2" : "w-64 p-4"
+      )}
+    >
+      <div
+        className={cn(
+          "flex items-center py-5",
+          collapsed ? "flex-col gap-3 px-1" : "gap-3 px-3"
+        )}
+      >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--c-panel)] font-heading text-xl font-semibold text-[var(--c-accent)] shadow-[0_1px_3px_rgba(74,64,54,0.08)]">
           C
         </span>
-        <div className="min-w-0 flex-1 leading-tight">
-          <span className="font-heading text-2xl font-semibold tracking-tight text-[var(--c-ink-2)]">
-            Cadence
-          </span>
-          <p className="text-xs tracking-wide text-[var(--c-dim)]">Your life vault</p>
-        </div>
+        {!collapsed && (
+          <div className="min-w-0 flex-1 leading-tight">
+            <span className="font-heading text-2xl font-semibold tracking-tight text-[var(--c-ink-2)]">
+              Cadence
+            </span>
+            <p className="text-xs tracking-wide text-[var(--c-dim)]">Your life vault</p>
+          </div>
+        )}
         <ThemeToggle size={36} />
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          title={collapsed ? "Expand sidebar" : "Minimize sidebar"}
+          aria-label={collapsed ? "Expand sidebar" : "Minimize sidebar"}
+          aria-expanded={!collapsed}
+          className="flex size-9 shrink-0 items-center justify-center rounded-2xl text-[var(--c-dim)] transition-colors hover:bg-[var(--c-panel-soft)] hover:text-[var(--c-ink-2)]"
+        >
+          {collapsed ? (
+            <ChevronsRight className="size-4" />
+          ) : (
+            <ChevronsLeft className="size-4" />
+          )}
+        </button>
       </div>
 
       <nav className="flex-1 space-y-1.5">
         {NAV_LINKS.map(({ href, label, icon: Icon }) => {
           const active = isActiveRoute(pathname, href);
+          const showBadge = href === "/board" && urgentCount > 0;
           return (
             <Link
               key={href}
               href={href}
+              title={collapsed ? label : undefined}
               className={cn(
-                "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all",
+                "relative flex items-center rounded-2xl text-sm font-medium transition-all",
+                collapsed ? "justify-center p-3" : "gap-3 px-4 py-3",
                 active
                   ? "bg-[var(--c-panel)] text-[#a35d4d] shadow-[0_1px_3px_rgba(74,64,54,0.08)]"
                   : "text-[var(--c-ink-3)] hover:bg-[var(--c-panel-soft)] hover:text-[var(--c-ink-2)]"
               )}
             >
-              <Icon className={cn("size-4", active && "text-[#a35d4d]")} />
-              <span className="flex-1">{label}</span>
-              {href === "/board" && urgentCount > 0 && (
+              <Icon className={cn("size-4 shrink-0", active && "text-[#a35d4d]")} />
+              {!collapsed && <span className="flex-1">{label}</span>}
+              {showBadge && !collapsed && (
                 <span
                   title={`${urgentCount} task${
                     urgentCount === 1 ? "" : "s"
@@ -205,14 +279,22 @@ export function Sidebar() {
                   {urgentCount}
                 </span>
               )}
+              {showBadge && collapsed && (
+                <span
+                  aria-label={`${urgentCount} urgent task${
+                    urgentCount === 1 ? "" : "s"
+                  }`}
+                  className="absolute right-1.5 top-1.5 size-2 rounded-full bg-[#c2410c]"
+                />
+              )}
             </Link>
           );
         })}
       </nav>
 
       <div className="pt-3">
-        <TimerWidget />
-        <AccountFooter />
+        {!collapsed && <TimerWidget />}
+        <AccountFooter collapsed={collapsed} />
       </div>
     </aside>
   );
