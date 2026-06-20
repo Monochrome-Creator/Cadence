@@ -2611,8 +2611,11 @@ export default function BoardPage() {
               items={sections.map(([cat]) => `section:${cat}`)}
               strategy={verticalListSortingStrategy}
             >
+            {/* Zoom wrapper kept separate from the scroll container: Chrome
+                mishandles CSS `zoom` on the same element that owns
+                `overflow-x-auto` (esp. inside an overflow-clipped <main>). */}
+            <div style={zoom !== 1 ? { zoom } : undefined}>
             <div
-              style={zoom !== 1 ? { zoom } : undefined}
               className={cn(
                 layout === "columns"
                   ? "flex items-start gap-6 overflow-x-auto pb-4"
@@ -2848,6 +2851,7 @@ export default function BoardPage() {
                   </SortableCategorySection>
                 );
               })}
+            </div>
             </div>
             </SortableContext>
 
