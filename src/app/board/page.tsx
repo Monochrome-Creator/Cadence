@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import TextareaAutosize from "react-textarea-autosize";
 import {
   DndContext,
@@ -1631,17 +1632,87 @@ function SortableTaskCard({
         />
       </div>
 
-      {/* Smoothly animated micro-task compartment */}
+      {/* Inline (non-compact) layouts: smoothly animated micro-task compartment.
+          In the narrow Columns layout the indented tree would be unreadable, so
+          there we surface the same panel in a roomy modal instead (below). */}
+      {!compact && (
+        <div
+          className={cn(
+            "grid transition-all duration-300 ease-out",
+            expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+          )}
+        >
+          <div className="overflow-hidden">
+            {/* When the grid isn't shown, the inline Deadline column is hidden,
+                so it's surfaced here in the expandable view instead of dropped. */}
+            <div className="border-t border-[var(--c-line-2)] px-4 py-3 xl:hidden">
+              <p className="mb-1 text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
+                Deadline
+              </p>
+              <DeadlineField
+                value={task.deadline}
+                onChange={(next) => updateTask(task.id, { deadline: next })}
+              />
+            </div>
+
+            <MicroTaskPanel task={task} />
+          </div>
+        </div>
+      )}
+
+      {compact && expanded && (
+        <MicroTaskModal task={task} onClose={() => setExpanded(false)} />
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                    Roomy micro-task modal (Columns view)                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Full-width overlay for reading/editing a task's micro-tasks when the board is
+ * in the narrow Columns layout. Rendered through a portal to escape the card's
+ * (and columns') CSS transforms, which would otherwise break `position: fixed`.
+ */
+function MicroTaskModal({ task, onClose }: { task: Task; onClose: () => void }) {
+  const updateTask = useProdStore((s) => s.updateTask);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
-        className={cn(
-          "grid transition-all duration-300 ease-out",
-          expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-        )}
+        className="mt-[5vh] mb-8 w-full max-w-2xl rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] shadow-[0_24px_60px_rgba(74,64,54,0.28)]"
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className="overflow-hidden">
-          {/* When the grid isn't shown, the inline Deadline column is hidden,
-              so it's surfaced here in the expandable view instead of dropped. */}
-          <div className="border-t border-[var(--c-line-2)] px-4 py-3 xl:hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--c-line-2)] px-5 py-3.5">
+          <p className="min-w-0 flex-1 truncate font-heading text-base font-semibold text-[var(--c-ink-2)]">
+            {task.title || "Untitled task"}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close micro-tasks"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--c-dim)] transition-colors hover:bg-[var(--c-beige-2)] hover:text-[var(--c-ink-2)]"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="max-h-[80vh] overflow-y-auto">
+          <div className="border-b border-[var(--c-line-2)] px-4 py-3">
             <p className="mb-1 text-[11px] font-semibold tracking-wide text-[var(--c-dim)] uppercase">
               Deadline
             </p>
@@ -1650,11 +1721,11 @@ function SortableTaskCard({
               onChange={(next) => updateTask(task.id, { deadline: next })}
             />
           </div>
-
           <MicroTaskPanel task={task} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
