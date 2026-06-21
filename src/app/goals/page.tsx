@@ -31,6 +31,12 @@ function formatTarget(date: string): string {
   return format(parseISO(match[0]), "dd MMM yyyy");
 }
 
+/** Coerce a stored target date into the yyyy-MM-dd a <input type="date"> needs. */
+function toDateInputValue(date: string): string {
+  const match = date.match(/\d{4}-\d{2}-\d{2}/);
+  return match && isValid(parseISO(match[0])) ? match[0] : "";
+}
+
 /* -------------------------------------------------------------------------- */
 /*                          Pillar picker (compact)                           */
 /* -------------------------------------------------------------------------- */
@@ -334,11 +340,29 @@ function GoalCard({
             {pillar.label}
           </span>
         )}
-        {target && (
-          <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--c-dim)]">
+        {isDone ? (
+          target && (
+            <span className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--c-dim)]">
+              <CalendarDays className="size-3.5 text-[var(--c-faint)]" />
+              Target: {target}
+            </span>
+          )
+        ) : (
+          <label
+            title="Set a target date"
+            className="inline-flex items-center gap-1.5 text-[12.5px] text-[var(--c-dim)]"
+          >
             <CalendarDays className="size-3.5 text-[var(--c-faint)]" />
-            Target: {target}
-          </span>
+            <span>Target:</span>
+            <input
+              type="date"
+              value={toDateInputValue(goal.targetDate)}
+              onChange={(e) =>
+                updateGoal(goal.id, { targetDate: e.target.value })
+              }
+              className="rounded-md border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-2 py-0.5 text-[12.5px] text-[var(--c-ink-2)] outline-none focus:border-[#a35d4d]/50"
+            />
+          </label>
         )}
         <span className="text-[12.5px] text-[var(--c-dim)]">
           {linkedCount === 0
