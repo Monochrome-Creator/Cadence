@@ -28,7 +28,7 @@ import {
  *      Supabase has confirmed a valid session — eliminating the startup race
  *      where `hydrate()` was previously called before the access token was ready.
  *
- * Doing this here (rather than per page) means every route — board, flashcards,
+ * Doing this here (rather than per page) means every route — board, daily plan,
  * timer — shares the same restored state.
  */
 export function CloudSyncProvider() {

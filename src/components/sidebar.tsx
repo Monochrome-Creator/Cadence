@@ -10,7 +10,6 @@ import {
   Inbox,
   LayoutDashboard,
   LayoutGrid,
-  Layers,
   LogIn,
   LogOut,
   Repeat,
@@ -32,7 +31,6 @@ const NAV_LINKS = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/goals", label: "North Star", icon: Target },
   { href: "/recurring", label: "Scheduled", icon: Repeat },
-  { href: "/flashcards", label: "Flashcards", icon: Layers },
 ];
 
 /**
@@ -47,7 +45,6 @@ const MOBILE_NAV_LINKS = [
   { href: "/inbox", label: "Inbox", icon: Inbox },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/timer", label: "Timer", icon: Timer },
-  { href: "/flashcards", label: "Cards", icon: Layers },
 ];
 
 /** localStorage key remembering whether the desktop sidebar is minimized. */

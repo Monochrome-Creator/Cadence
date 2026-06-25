@@ -30,7 +30,7 @@ const playfair = Playfair_Display({
 
 export const metadata: Metadata = {
   title: "Cadence",
-  description: "Your productivity board, flashcards, and focus timer.",
+  description: "Your productivity board, daily plan, and focus timer.",
   appleWebApp: {
     capable: true,
     title: "Cadence",

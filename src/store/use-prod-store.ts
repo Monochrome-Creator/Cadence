@@ -22,12 +22,10 @@ import {
   isSupabaseConfigured,
   pullCategories,
   pullDailyPlan,
-  pullFlashcards,
   pullGoals,
   pullTasks,
   pushCategories,
   pushDailyPlan,
-  pushFlashcards,
   pushGoals,
   pushTasks,
   type SyncOutcome,
@@ -305,11 +303,6 @@ export interface Goal {
   lifePillar?: LifePillar;
   status: "active" | "done";
   order: number;
-}
-
-export interface Flashcard {
-  question: string;
-  answer: string;
 }
 
 /** One day's logged productivity, keyed by local `yyyy-MM-dd` in `history`. */
@@ -641,13 +634,12 @@ export const TIMER_MODE_LABELS: Record<TimerMode, string> = {
 /* -------------------------------------------------------------------------- */
 
 interface ProdState {
-  // Board / flashcards
+  // Board
   tasks: Task[];
   /** Managed, ordered list of board categories (columns). Persists empty ones. */
   categories: string[];
   /** North Star goals — the big objectives tasks are working toward. */
   goals: Goal[];
-  flashcards: Flashcard[];
   activeTaskId: string | null;
   /** Daily productivity log keyed by local `yyyy-MM-dd` — powers the streak. */
   history: Record<string, DayActivity>;
@@ -684,7 +676,7 @@ interface ProdState {
   /** Monotonic counter bumped on every completed session — drives the chime. */
   completions: number;
 
-  // Board / flashcard actions
+  // Board actions
   addTask: (
     task: Omit<
       Task,
@@ -834,7 +826,6 @@ interface ProdState {
    */
   deleteGoal: (id: string) => void;
 
-  setFlashcards: (flashcards: Flashcard[]) => void;
   setActiveTask: (id: string | null) => void;
 
   /**
@@ -1180,19 +1171,12 @@ function pushGoalsIfCloud(getState: () => ProdState): void {
   void pushGoals(getState().goals);
 }
 
-/** Persist the flashcards to the cloud (no-op when unconfigured). */
-function pushFlashcardsIfCloud(getState: () => ProdState): void {
-  if (!isSupabaseConfigured) return;
-  void pushFlashcards(getState().flashcards);
-}
-
 export const useProdStore = create<ProdState>()(
   persist(
     (set, get) => ({
   tasks: initialTasks,
   categories: initialCategories,
   goals: [],
-  flashcards: [],
   activeTaskId: null,
   history: {},
   dailyPlan: null,
@@ -1786,10 +1770,6 @@ export const useProdStore = create<ProdState>()(
     pushGoalsIfCloud(get);
   },
 
-  setFlashcards: (flashcards) => {
-    set({ flashcards });
-    pushFlashcardsIfCloud(get);
-  },
   setActiveTask: (id) => set({ activeTaskId: id }),
 
   hydrate: async () => {
@@ -1846,8 +1826,8 @@ export const useProdStore = create<ProdState>()(
           pendingReview: cloudPlan.review ?? get().pendingReview,
         });
       }
-      // North Star goals + flashcards: adopt the cloud copy when present, or
-      // seed it from local on first run so existing local data isn't lost.
+      // North Star goals: adopt the cloud copy when present, or seed it from
+      // local on first run so existing local data isn't lost.
       const cloudGoals = await pullGoals();
       if (cloudGoals === null) {
         // Read failed — keep the local list.
@@ -1855,15 +1835,6 @@ export const useProdStore = create<ProdState>()(
         set({ goals: cloudGoals });
       } else if (get().goals.length > 0) {
         await pushGoals(get().goals);
-      }
-
-      const cloudCards = await pullFlashcards();
-      if (cloudCards === null) {
-        // Read failed — keep the local list.
-      } else if (cloudCards.length > 0) {
-        set({ flashcards: cloudCards });
-      } else if (get().flashcards.length > 0) {
-        await pushFlashcards(get().flashcards);
       }
 
       set({ connectionStatus: "synced" });
@@ -1938,14 +1909,6 @@ export const useProdStore = create<ProdState>()(
         set({ goals: cloudGoals });
       } else if (get().goals.length > 0) {
         await pushGoals(get().goals);
-      }
-      const cloudCards = await pullFlashcards();
-      if (cloudCards === null) {
-        // Read failed — keep local.
-      } else if (cloudCards.length > 0) {
-        set({ flashcards: cloudCards });
-      } else if (get().flashcards.length > 0) {
-        await pushFlashcards(get().flashcards);
       }
       set({ connectionStatus: "synced" });
     } catch (error) {
@@ -2042,7 +2005,6 @@ export const useProdStore = create<ProdState>()(
         tasks: state.tasks,
         categories: state.categories,
         goals: state.goals,
-        flashcards: state.flashcards,
         activeTaskId: state.activeTaskId,
         history: state.history,
         dailyPlan: state.dailyPlan,
@@ -2059,7 +2021,6 @@ export function seedDemoData(): void {
     tasks: demoTasks,
     categories: demoCategories,
     goals: [],
-    flashcards: [],
     history: {},
     dailyPlan: null,
     pendingReview: null,

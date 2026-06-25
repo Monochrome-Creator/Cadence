@@ -15,7 +15,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getSupabaseClient, isSupabaseConfigured } from "@/utils/supabase/client";
 import type {
-  Flashcard,
   Goal,
   LifePillar,
   Recurrence,
@@ -738,55 +737,6 @@ export async function pushGoals(goals: Goal[]): Promise<void> {
     }
   } catch (error) {
     console.error("[cadence] push goals threw", error);
-  }
-}
-
-/* ------------------------------ flashcards ------------------------------- */
-
-/**
- * Pulls the user's flashcards. Returns `null` when sync is off, no user is
- * signed in, the column is empty, or the read fails — callers keep local then.
- */
-export async function pullFlashcards(): Promise<Flashcard[] | null> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-  try {
-    const userId = await getUserId(supabase);
-    if (!userId) return null;
-    const { data, error } = await withTimeout(
-      supabase.from("users").select("flashcards").eq("id", userId).maybeSingle(),
-      "pull flashcards"
-    );
-    if (error) {
-      if (!isMissingTable(error)) {
-        console.error("[cadence] pull flashcards failed", error);
-      }
-      return null;
-    }
-    return (data?.flashcards as Flashcard[] | null) ?? null;
-  } catch (error) {
-    console.error("[cadence] pull flashcards threw", error);
-    return null;
-  }
-}
-
-/** Persists the user's flashcards. Fire-and-forget. */
-export async function pushFlashcards(flashcards: Flashcard[]): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return;
-  try {
-    const userId = await getUserId(supabase);
-    if (!userId) return;
-    const { error } = await withAuthRetry(
-      supabase,
-      () => supabase.from("users").update({ flashcards }).eq("id", userId),
-      "push flashcards"
-    );
-    if (error && !isMissingTable(error)) {
-      console.error("[cadence] push flashcards failed", error);
-    }
-  } catch (error) {
-    console.error("[cadence] push flashcards threw", error);
   }
 }
 

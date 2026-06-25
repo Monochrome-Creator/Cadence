@@ -11,7 +11,7 @@ export default function manifest(): MetadataRoute.Manifest {
     id: `${base}/`,
     name: "Cadence",
     short_name: "Cadence",
-    description: "Your productivity board, flashcards, and focus timer.",
+    description: "Your productivity board, daily plan, and focus timer.",
     start_url: `${base}/`,
     scope: `${base}/`,
     display: "standalone",
