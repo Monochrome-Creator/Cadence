@@ -279,6 +279,128 @@ function PlanCard({
   );
 }
 
+/**
+ * Dropdown that lets the user pick ANY eligible task (active, not Inbox, not
+ * already in focus) and send it to Today — not just the ranked suggestions.
+ * Mirrors the capacity cap so a full focus disables adding.
+ */
+function FocusPicker({ tasks }: { tasks: Task[] }) {
+  const sendTaskToToday = useProdStore((s) => s.sendTaskToToday);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const eligible = useMemo(
+    () =>
+      tasks
+        .filter(
+          (t) => !t.isToday && t.status !== "Done" && t.status !== "Inbox"
+        )
+        .sort((a, b) => a.order - b.order),
+    [tasks]
+  );
+  const focusFull = countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return eligible;
+    return eligible.filter((t) => t.title.toLowerCase().includes(q));
+  }, [eligible, query]);
+
+  const closeMenu = () => {
+    setOpen(false);
+    setQuery("");
+  };
+  const handlePick = (id: string) => {
+    if (sendTaskToToday(id)) closeMenu();
+  };
+
+  // Close the menu on Escape while it's open.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMenu();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={focusFull || eligible.length === 0}
+        title={
+          focusFull
+            ? `Today's focus is full (max ${MAX_TODAY_TASKS})`
+            : eligible.length === 0
+              ? "No tasks available to add"
+              : "Pick any task to add to today's focus"
+        }
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+          focusFull || eligible.length === 0
+            ? "cursor-not-allowed border border-[var(--c-line)] bg-[var(--c-beige-2)] text-[var(--c-faint)]"
+            : "border border-[var(--c-line)] bg-[var(--c-panel)] text-[var(--c-ink-2)] hover:border-[#e4c4a8] hover:text-[#a35d4d]"
+        )}
+      >
+        <Plus className="size-3.5" />
+        Add task
+        <ChevronDown
+          className={cn("size-3.5 transition-transform", open && "rotate-180")}
+        />
+      </button>
+
+      {open && (
+        <>
+          {/* Click-away backdrop */}
+          <div className="fixed inset-0 z-40" onClick={closeMenu} />
+          <div className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] shadow-[0_18px_44px_rgba(74,64,54,0.22)]">
+            <div className="border-b border-[var(--c-line)] p-2">
+              <input
+                autoFocus
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search tasks…"
+                className="w-full rounded-lg border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-2.5 py-1.5 text-[13px] text-[var(--c-ink-2)] outline-none placeholder:text-[var(--c-faint)] focus:border-[#a35d4d]/50"
+              />
+            </div>
+            <div className="max-h-64 overflow-y-auto p-1.5">
+              {filtered.length === 0 ? (
+                <p className="px-2 py-3 text-center text-[12.5px] text-[var(--c-dim)]">
+                  No matching tasks.
+                </p>
+              ) : (
+                filtered.map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => handlePick(task.id)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--c-beige-2)]"
+                  >
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                        PRIORITY_PILL[task.priority]
+                      )}
+                    >
+                      {task.priority}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-[var(--c-ink-2)]">
+                      {task.title || "Untitled task"}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** One suggestion row inside the "Suggested next" card. */
 function SuggestionRow({
   task,
@@ -757,11 +879,14 @@ export default function CalendarPage() {
               <Sun className="size-4 text-[#a35d4d]" />
               Today&rsquo;s focus
             </h2>
-            {main.length > 0 && (
-              <span className="text-[12.5px] font-medium text-[var(--c-dim)] tabular-nums">
-                {mainDone}/{main.length} done
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {main.length > 0 && (
+                <span className="text-[12.5px] font-medium text-[var(--c-dim)] tabular-nums">
+                  {mainDone}/{main.length} done
+                </span>
+              )}
+              <FocusPicker tasks={tasks} />
+            </div>
           </div>
 
           {main.length > 0 ? (
