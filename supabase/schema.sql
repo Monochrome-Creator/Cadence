@@ -105,6 +105,10 @@ create table if not exists public.tasks (
   -- Times the deadline has been pushed back via the overdue review. Drives the
   -- "moved N×" badge and the 3-strikes escalation. Defaults 0.
   postpone_count   integer not null default 0 check (postpone_count >= 0),
+  -- Linked North Star goal id (goal-<uuid>). Goals live as jsonb on the user
+  -- row (no goals table), so this is a plain nullable text reference, not a FK.
+  -- Null when the task isn't anchored to a goal.
+  goal_id          text,
   updated_at       timestamptz not null default now()
 );
 
@@ -139,6 +143,10 @@ alter table public.tasks
 alter table public.tasks
   add column if not exists postpone_count integer not null default 0
     check (postpone_count >= 0);
+
+-- Existing installs: add the North Star goal link.
+alter table public.tasks
+  add column if not exists goal_id text;
 
 -- Existing installs: add the manual completion-percent override column.
 alter table public.tasks

@@ -50,6 +50,8 @@ type TaskRow = {
   last_completed_period: string | null;
   /** Times the deadline has been pushed back via the overdue review. */
   postpone_count: number;
+  /** Linked North Star goal id (goal-<uuid>); null when unlinked. */
+  goal_id: string | null;
 };
 
 type SubtaskRow = {
@@ -292,6 +294,7 @@ function taskToRow(task: Task, userId: string): TaskRow {
     life_pillar: task.lifePillar ?? null,
     last_completed_period: task.lastCompletedPeriod ?? null,
     postpone_count: task.postponeCount ?? 0,
+    goal_id: task.goalId ?? null,
   };
 }
 
@@ -336,6 +339,8 @@ function rowToTask(row: TaskRow, subtasks: Subtask[]): Task {
       : {}),
     // Tolerate rows synced before the postpone_count column existed.
     ...(row.postpone_count ? { postponeCount: row.postpone_count } : {}),
+    // Tolerate rows synced before the goal_id column existed (null/undefined).
+    ...(row.goal_id ? { goalId: row.goal_id } : {}),
     subtasks,
   };
 }
