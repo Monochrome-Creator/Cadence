@@ -48,6 +48,8 @@ type TaskRow = {
   life_pillar: string | null;
   /** Calendar-period key of the last completion for recurring tasks; null otherwise. */
   last_completed_period: string | null;
+  /** Times the deadline has been pushed back via the overdue review. */
+  postpone_count: number;
 };
 
 type SubtaskRow = {
@@ -289,6 +291,7 @@ function taskToRow(task: Task, userId: string): TaskRow {
     is_today: task.isToday ?? false,
     life_pillar: task.lifePillar ?? null,
     last_completed_period: task.lastCompletedPeriod ?? null,
+    postpone_count: task.postponeCount ?? 0,
   };
 }
 
@@ -331,6 +334,8 @@ function rowToTask(row: TaskRow, subtasks: Subtask[]): Task {
     ...(row.last_completed_period
       ? { lastCompletedPeriod: row.last_completed_period }
       : {}),
+    // Tolerate rows synced before the postpone_count column existed.
+    ...(row.postpone_count ? { postponeCount: row.postpone_count } : {}),
     subtasks,
   };
 }

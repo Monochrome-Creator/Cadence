@@ -102,6 +102,9 @@ create table if not exists public.tasks (
   -- the period in which the task was last completed (e.g. '2026-W24', '2026-06',
   -- '2026-Q2'). When the current period's key differs, the task reopens.
   last_completed_period text,
+  -- Times the deadline has been pushed back via the overdue review. Drives the
+  -- "moved N×" badge and the 3-strikes escalation. Defaults 0.
+  postpone_count   integer not null default 0 check (postpone_count >= 0),
   updated_at       timestamptz not null default now()
 );
 
@@ -131,6 +134,11 @@ alter table public.tasks
 -- Existing installs: add the GTD "Today" promotion flag.
 alter table public.tasks
   add column if not exists is_today boolean not null default false;
+
+-- Existing installs: add the overdue-review postpone counter.
+alter table public.tasks
+  add column if not exists postpone_count integer not null default 0
+    check (postpone_count >= 0);
 
 -- Existing installs: add the manual completion-percent override column.
 alter table public.tasks

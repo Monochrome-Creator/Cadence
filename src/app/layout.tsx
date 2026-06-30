@@ -8,6 +8,7 @@ import { DailyPlanManager } from "@/components/daily-plan-manager";
 import { DebugPanel } from "@/components/debug-panel";
 import { DemoBanner } from "@/components/demo-banner";
 import { NotificationManager } from "@/components/notification-manager";
+import { OverdueReviewModal } from "@/components/overdue-review-modal";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { QuickAddModal } from "@/components/quick-add-modal";
 import { Toaster } from "@/components/toaster";
@@ -71,6 +72,7 @@ export default function RootLayout({
         <CloudSyncProvider />
         <DemoBanner />
         <DailyPlanManager />
+        <OverdueReviewModal />
         <NotificationManager />
         <ConnectionStatus />
         <DebugPanel />

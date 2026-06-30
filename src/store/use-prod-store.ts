@@ -193,6 +193,12 @@ export interface Task {
    * Undefined for tasks not tied to any goal.
    */
   goalId?: string;
+  /**
+   * How many times this task's deadline has been pushed back via the overdue
+   * review. Drives the "moved N×" badge and the 3-strikes escalation that stops
+   * the user from endlessly rescheduling. Undefined/0 means never postponed.
+   */
+  postponeCount?: number;
   subtasks: Subtask[];
 }
 
@@ -698,6 +704,11 @@ interface ProdState {
    * surface the "capacity reached" toast. Returns true once promoted.
    */
   sendTaskToToday: (id: string) => boolean;
+  /**
+   * Push an overdue task's deadline to a new date and bump its postpone count —
+   * the counter the overdue review uses to escalate after repeated slips.
+   */
+  postponeTask: (id: string, newDeadline: string) => void;
   /** Demotes a Daily Action task back to the Workspace backlog (clears isToday). */
   removeTaskFromToday: (id: string) => void;
   /**
@@ -1257,6 +1268,14 @@ export const useProdStore = create<ProdState>()(
     if (countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS) return false;
     get().updateTask(id, { isToday: true });
     return true;
+  },
+  postponeTask: (id, newDeadline) => {
+    const target = get().tasks.find((t) => t.id === id);
+    if (!target) return;
+    get().updateTask(id, {
+      deadline: newDeadline,
+      postponeCount: (target.postponeCount ?? 0) + 1,
+    });
   },
   removeTaskFromToday: (id) => get().updateTask(id, { isToday: false }),
   returnTaskToInbox: (id) =>
