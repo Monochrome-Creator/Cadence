@@ -9,6 +9,7 @@ import { DebugPanel } from "@/components/debug-panel";
 import { DemoBanner } from "@/components/demo-banner";
 import { NotificationManager } from "@/components/notification-manager";
 import { OverdueReviewModal } from "@/components/overdue-review-modal";
+import { OverloadGuard } from "@/components/overload-guard";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { QuickAddModal } from "@/components/quick-add-modal";
 import { Toaster } from "@/components/toaster";
@@ -73,6 +74,7 @@ export default function RootLayout({
         <DemoBanner />
         <DailyPlanManager />
         <OverdueReviewModal />
+        <OverloadGuard />
         <NotificationManager />
         <ConnectionStatus />
         <DebugPanel />
