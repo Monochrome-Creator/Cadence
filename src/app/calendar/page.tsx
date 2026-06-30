@@ -282,37 +282,51 @@ function PlanCard({
 /**
  * Dropdown that lets the user pick ANY eligible task (active, not Inbox, not
  * already in focus) and send it to Today — not just the ranked suggestions.
- * Mirrors the capacity cap so a full focus disables adding.
+ *
+ * Tasks are ranked the same way as "Suggested next" (overdue → due today →
+ * priority → order), and each row shows its deadline and micro-task progress at
+ * a glance, with a chevron to expand the steps inline — so the user can plan the
+ * whole day from here without bouncing over to the Workspace.
  */
-function FocusPicker({ tasks }: { tasks: Task[] }) {
+function FocusPicker({ tasks, today }: { tasks: Task[]; today: string }) {
   const sendTaskToToday = useProdStore((s) => s.sendTaskToToday);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // Same ranking as "Suggested next", but over the FULL eligible set so any
+  // task can be chosen — surfacing the most urgent/important ones first.
   const eligible = useMemo(
-    () =>
-      tasks
-        .filter(
-          (t) => !t.isToday && t.status !== "Done" && t.status !== "Inbox"
-        )
-        .sort((a, b) => a.order - b.order),
-    [tasks]
+    () => suggestFocusCandidates(tasks, today),
+    [tasks, today]
   );
   const focusFull = countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return eligible;
-    return eligible.filter((t) => t.title.toLowerCase().includes(q));
+    return eligible.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        t.subtasks.some((s) => s.title.toLowerCase().includes(q))
+    );
   }, [eligible, query]);
 
   const closeMenu = () => {
     setOpen(false);
     setQuery("");
+    setExpanded(new Set());
   };
   const handlePick = (id: string) => {
     if (sendTaskToToday(id)) closeMenu();
   };
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // Close the menu on Escape while it's open.
   useEffect(() => {
@@ -355,43 +369,114 @@ function FocusPicker({ tasks }: { tasks: Task[] }) {
         <>
           {/* Click-away backdrop */}
           <div className="fixed inset-0 z-40" onClick={closeMenu} />
-          <div className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] shadow-[0_18px_44px_rgba(74,64,54,0.22)]">
+          <div className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] shadow-[0_18px_44px_rgba(74,64,54,0.22)]">
             <div className="border-b border-[var(--c-line)] p-2">
               <input
                 autoFocus
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search tasks…"
+                placeholder="Search tasks or steps…"
                 className="w-full rounded-lg border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-2.5 py-1.5 text-[13px] text-[var(--c-ink-2)] outline-none placeholder:text-[var(--c-faint)] focus:border-[#a35d4d]/50"
               />
             </div>
-            <div className="max-h-64 overflow-y-auto p-1.5">
+            <div className="max-h-80 overflow-y-auto p-1.5">
               {filtered.length === 0 ? (
                 <p className="px-2 py-3 text-center text-[12.5px] text-[var(--c-dim)]">
                   No matching tasks.
                 </p>
               ) : (
-                filtered.map((task) => (
-                  <button
-                    key={task.id}
-                    type="button"
-                    onClick={() => handlePick(task.id)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[var(--c-beige-2)]"
-                  >
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                        PRIORITY_PILL[task.priority]
-                      )}
+                filtered.map((task) => {
+                  const iso = taskDeadlineIso(task.deadline);
+                  const overdue = !!iso && iso < today;
+                  const dueToday = !!iso && iso === today;
+                  const deadlineLabel = formatDeadline(task.deadline);
+                  const total = task.subtasks.length;
+                  const stepsDone = task.subtasks.filter(
+                    (s) => s.status === "done" || s.status === "cancelled"
+                  ).length;
+                  const isOpen = expanded.has(task.id);
+
+                  return (
+                    <div
+                      key={task.id}
+                      className="rounded-lg transition-colors hover:bg-[var(--c-beige-2)]"
                     >
-                      {task.priority}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-[var(--c-ink-2)]">
-                      {task.title || "Untitled task"}
-                    </span>
-                  </button>
-                ))
+                      <div className="flex items-start gap-1 px-1.5 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handlePick(task.id)}
+                          title="Add to today's focus"
+                          className="flex min-w-0 flex-1 items-start gap-2 rounded-lg px-1 py-0.5 text-left"
+                        >
+                          <span
+                            className={cn(
+                              "mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                              PRIORITY_PILL[task.priority]
+                            )}
+                          >
+                            {task.priority}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[13.5px] text-[var(--c-ink-2)]">
+                              {task.title || "Untitled task"}
+                            </span>
+                            {(deadlineLabel || total > 0) && (
+                              <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+                                {overdue ? (
+                                  <span className="rounded-full bg-[#f6dada] px-1.5 py-0.5 font-medium text-[#9b3b3b]">
+                                    Overdue
+                                    {deadlineLabel ? ` · ${deadlineLabel}` : ""}
+                                  </span>
+                                ) : dueToday ? (
+                                  <span className="rounded-full bg-[#f6e6da] px-1.5 py-0.5 font-medium text-[#a35d4d]">
+                                    Due today
+                                  </span>
+                                ) : (
+                                  deadlineLabel && (
+                                    <span className="inline-flex items-center gap-1 text-[var(--c-dim)]">
+                                      <CalendarDays className="size-3 text-[var(--c-faint)]" />
+                                      {deadlineLabel}
+                                    </span>
+                                  )
+                                )}
+                                {total > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[var(--c-dim)]">
+                                    <ListChecks className="size-3 text-[var(--c-faint)]" />
+                                    {stepsDone}/{total} steps
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+
+                        {total > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpand(task.id)}
+                            title={isOpen ? "Hide steps" : "Show steps"}
+                            aria-label={isOpen ? "Hide steps" : "Show steps"}
+                            className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md text-[var(--c-faint)] transition-colors hover:bg-[var(--c-line)] hover:text-[var(--c-ink-3)]"
+                          >
+                            <ChevronDown
+                              className={cn(
+                                "size-4 transition-transform",
+                                isOpen && "rotate-180"
+                              )}
+                            />
+                          </button>
+                        )}
+                      </div>
+
+                      {isOpen && total > 0 && (
+                        <div className="px-2 pb-2">
+                          <MicroTaskList task={task} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -885,7 +970,7 @@ export default function CalendarPage() {
                   {mainDone}/{main.length} done
                 </span>
               )}
-              <FocusPicker tasks={tasks} />
+              <FocusPicker tasks={tasks} today={today} />
             </div>
           </div>
 
