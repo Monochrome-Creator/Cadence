@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { AlertTriangle, CalendarClock, Check, Trash2, X } from "lucide-react";
 
@@ -92,6 +93,16 @@ export function OverdueReviewModal() {
   const updateTask = useProdStore((s) => s.updateTask);
   const deleteTask = useProdStore((s) => s.deleteTask);
 
+  // Auth screens (login / password reset / OAuth callback) render their own
+  // full-bleed layout with no app chrome and no real session yet — the review
+  // must never surface there, even if localStorage still holds overdue tasks
+  // from a previous session.
+  const pathname = usePathname();
+  const isAuthRoute =
+    pathname === "/login" ||
+    pathname === "/reset" ||
+    pathname.startsWith("/auth");
+
   const today = todayKey();
   const overdue = useMemo(
     () => tasks.filter((t) => isOverdue(t, today)),
@@ -107,7 +118,9 @@ export function OverdueReviewModal() {
 
   useEffect(() => {
     // Don't stack on top of the "you missed these" review; wait our turn.
-    if (!isHydrated || pendingReview || overdue.length === 0) return;
+    // Never auto-open on auth screens (no session yet).
+    if (isAuthRoute || !isHydrated || pendingReview || overdue.length === 0)
+      return;
     const snooze = readSnooze();
     if (
       snooze &&
@@ -120,9 +133,9 @@ export function OverdueReviewModal() {
     setOpen(true);
     // `overdueKey` stands in for `overdue`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHydrated, overdueKey, pendingReview]);
+  }, [isAuthRoute, isHydrated, overdueKey, pendingReview]);
 
-  if (!open || overdue.length === 0) return null;
+  if (isAuthRoute || !open || overdue.length === 0) return null;
 
   const dismiss = (ms: number) => {
     writeSnooze(
