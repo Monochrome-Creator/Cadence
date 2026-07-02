@@ -709,6 +709,13 @@ interface ProdState {
    * the counter the overdue review uses to escalate after repeated slips.
    */
   postponeTask: (id: string, newDeadline: string) => void;
+  /**
+   * Skips a recurring task's current occurrence by advancing its deadline along
+   * its OWN cadence to the next occurrence — so postponing a repeated task from
+   * the overdue review never drifts its repeat day the way a hand-picked date
+   * would. No-op for one-off tasks. Does not bump the postpone counter.
+   */
+  skipRecurrence: (id: string) => void;
   /** Demotes a Daily Action task back to the Workspace backlog (clears isToday). */
   removeTaskFromToday: (id: string) => void;
   /**
@@ -1276,6 +1283,20 @@ export const useProdStore = create<ProdState>()(
       deadline: newDeadline,
       postponeCount: (target.postponeCount ?? 0) + 1,
     });
+  },
+  skipRecurrence: (id) => {
+    const target = get().tasks.find((t) => t.id === id);
+    if (!target || target.recurrence === "none") return;
+    // Advance along the task's own interval to the next occurrence on/after
+    // tomorrow. This mirrors refreshRecurringTasks' roll-forward, so the repeat
+    // day stays anchored to the original cadence instead of drifting.
+    const base = target.deadline || format(new Date(), "yyyy-MM-dd");
+    const next = advanceDeadlineToCurrentPeriod(
+      base,
+      target.recurrence,
+      addDays(new Date(), 1)
+    );
+    get().updateTask(id, { deadline: next });
   },
   removeTaskFromToday: (id) => get().updateTask(id, { isToday: false }),
   returnTaskToInbox: (id) =>

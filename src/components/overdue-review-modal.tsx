@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
-import { AlertTriangle, CalendarClock, Check, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarClock,
+  Check,
+  Repeat,
+  SkipForward,
+  Trash2,
+  X,
+} from "lucide-react";
 
 import { todayKey, useProdStore, type Task } from "@/store/use-prod-store";
 import { cn } from "@/lib/utils";
@@ -36,6 +44,22 @@ function isOverdue(task: Task, today: string): boolean {
 function dueLabel(deadline: string): string {
   const iso = deadlineIso(deadline);
   return iso ? format(parseISO(iso), "d MMM") : "";
+}
+
+/** Short label for a repeat interval, e.g. "week" for a weekly task. */
+function recurrenceUnit(recurrence: Task["recurrence"]): string {
+  switch (recurrence) {
+    case "daily":
+      return "day";
+    case "weekly":
+      return "week";
+    case "monthly":
+      return "month";
+    case "quarterly":
+      return "quarter";
+    default:
+      return "";
+  }
 }
 
 /**
@@ -90,6 +114,8 @@ export function OverdueReviewModal() {
   const tasks = useProdStore((s) => s.tasks);
   const pendingReview = useProdStore((s) => s.pendingReview);
   const postponeTask = useProdStore((s) => s.postponeTask);
+  const skipRecurrence = useProdStore((s) => s.skipRecurrence);
+  const completeAndRepeatTask = useProdStore((s) => s.completeAndRepeatTask);
   const updateTask = useProdStore((s) => s.updateTask);
   const deleteTask = useProdStore((s) => s.deleteTask);
 
@@ -199,8 +225,12 @@ export function OverdueReviewModal() {
         <div className="min-h-0 flex-1 overflow-y-auto px-5">
           <div className="flex flex-col gap-3 pb-2">
             {overdue.map((task) => {
+              const repeats = task.recurrence !== "none";
+              const unit = recurrenceUnit(task.recurrence);
               const strikes = task.postponeCount ?? 0;
-              const escalated = strikes >= STRIKES_LIMIT;
+              // Strikes/escalation only apply to one-off tasks — a repeating task
+              // is meant to keep coming back, so it never "runs out of moves".
+              const escalated = !repeats && strikes >= STRIKES_LIMIT;
               const due = dueLabel(task.deadline);
 
               return (
@@ -224,17 +254,24 @@ export function OverdueReviewModal() {
                         {task.category.trim() || (!due ? task.status : "")}
                       </p>
                     </div>
-                    {strikes > 0 && (
-                      <span
-                        className={cn(
-                          "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                          escalated
-                            ? "bg-[#f6dada] text-[#9b3b3b]"
-                            : "bg-[var(--c-beige-2)] text-[var(--c-dim)]"
-                        )}
-                      >
-                        Moved {strikes}×
+                    {repeats ? (
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#eae4f2] px-2 py-0.5 text-[11px] font-semibold text-[#6b5b8a] capitalize">
+                        <Repeat className="size-3" />
+                        {task.recurrence}
                       </span>
+                    ) : (
+                      strikes > 0 && (
+                        <span
+                          className={cn(
+                            "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                            escalated
+                              ? "bg-[#f6dada] text-[#9b3b3b]"
+                              : "bg-[var(--c-beige-2)] text-[var(--c-dim)]"
+                          )}
+                        >
+                          Moved {strikes}×
+                        </span>
+                      )
                     )}
                   </div>
 
@@ -245,36 +282,61 @@ export function OverdueReviewModal() {
                     </p>
                   )}
 
+                  {repeats && (
+                    <p className="flex items-center gap-1.5 text-[12px] text-[var(--c-dim)]">
+                      <Repeat className="size-3.5 shrink-0 text-[#6b5b8a]" />
+                      Repeats {task.recurrence}. Skip this one to bump it to the
+                      next {unit} — the repeat day stays put.
+                    </p>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="date"
-                      min={today}
-                      value={drafts[task.id] ?? ""}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [task.id]: e.target.value,
-                        }))
+                    {repeats ? (
+                      <button
+                        type="button"
+                        onClick={() => skipRecurrence(task.id)}
+                        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#a35d4d] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#8f4f41]"
+                      >
+                        <SkipForward className="size-3.5" />
+                        Skip to next {unit}
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          type="date"
+                          min={today}
+                          value={drafts[task.id] ?? ""}
+                          onChange={(e) =>
+                            setDrafts((prev) => ({
+                              ...prev,
+                              [task.id]: e.target.value,
+                            }))
+                          }
+                          aria-label={`New date for ${task.title || "untitled task"}`}
+                          className="h-9 min-w-0 flex-1 appearance-none rounded-lg border border-[var(--c-line-strong)] bg-[var(--c-panel)] px-2.5 text-[13px] font-medium text-[var(--c-ink-2)] outline-none transition-colors [color-scheme:light] focus:border-[#a35d4d] dark:[color-scheme:dark]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => reschedule(task.id)}
+                          disabled={!drafts[task.id]}
+                          className={cn(
+                            "inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-[13px] font-medium transition-colors disabled:opacity-40",
+                            escalated
+                              ? "text-[var(--c-dim)] hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-3)]"
+                              : "bg-[#a35d4d] text-white hover:bg-[#8f4f41]"
+                          )}
+                        >
+                          {escalated ? "Postpone again" : "Reschedule"}
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        repeats
+                          ? completeAndRepeatTask(task.id)
+                          : updateTask(task.id, { status: "Done" })
                       }
-                      aria-label={`New date for ${task.title || "untitled task"}`}
-                      className="h-9 min-w-0 flex-1 appearance-none rounded-lg border border-[var(--c-line-strong)] bg-[var(--c-panel)] px-2.5 text-[13px] font-medium text-[var(--c-ink-2)] outline-none transition-colors [color-scheme:light] focus:border-[#a35d4d] dark:[color-scheme:dark]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => reschedule(task.id)}
-                      disabled={!drafts[task.id]}
-                      className={cn(
-                        "inline-flex h-9 shrink-0 items-center rounded-lg px-3 text-[13px] font-medium transition-colors disabled:opacity-40",
-                        escalated
-                          ? "text-[var(--c-dim)] hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-3)]"
-                          : "bg-[#a35d4d] text-white hover:bg-[#8f4f41]"
-                      )}
-                    >
-                      {escalated ? "Postpone again" : "Reschedule"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateTask(task.id, { status: "Done" })}
                       title="Mark done"
                       className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-[#eef0e7] px-3 text-[13px] font-medium text-[#5f6b4a] transition-colors hover:bg-[#e3e8d6]"
                     >
