@@ -28,6 +28,7 @@ import {
   pushDailyPlan,
   pushGoals,
   pushTasks,
+  refreshSession,
   type SyncOutcome,
 } from "./cloud-sync";
 
@@ -586,6 +587,23 @@ export function computeHistoryStats(
  */
 export type ConnectionStatus = "synced" | "connecting" | "offline" | "error";
 
+/**
+ * A held-back "offline changes vs. cloud" comparison, surfaced when a reconnect
+ * would otherwise overwrite unsynced local edits. The sync-review modal reads
+ * this and lets the user Apply (push local) or Discard (take cloud). Runtime-only
+ * (never persisted): it's a transient decision prompt, not durable data.
+ */
+export interface PendingSync {
+  /** The cloud copy we'd adopt on Discard. */
+  cloudTasks: Task[];
+  /** Local tasks with edits/creations not yet confirmed synced. */
+  localTasks: Task[];
+  /** Ids of unsynced (edited/created) local tasks. */
+  unsyncedIds: string[];
+  /** Ids deleted locally but not yet confirmed removed from the cloud. */
+  deletedIds: string[];
+}
+
 /* -------------------------------------------------------------------------- */
 /*                          GTD "Today" capacity rule                         */
 /* -------------------------------------------------------------------------- */
@@ -673,6 +691,19 @@ interface ProdState {
   connectionStatus: ConnectionStatus;
   /** Last server-side sync error message (null when none) — shown when status is "error". */
   lastSyncError: string | null;
+  /**
+   * Durable offline outbox: task ids with local edits/creations that haven't
+   * been confirmed synced to the cloud. Persisted so unsynced work survives a
+   * reload/idle-timeout and isn't silently overwritten by the next cloud pull.
+   */
+  unsyncedTaskIds: string[];
+  /** Durable outbox for deletions not yet confirmed removed from the cloud. */
+  unsyncedDeletedIds: string[];
+  /**
+   * When set, a reconnect found unsynced local changes and paused instead of
+   * overwriting them — the sync-review modal renders from this. Null otherwise.
+   */
+  pendingSync: PendingSync | null;
 
   // Timer
   mode: TimerMode;
@@ -858,6 +889,21 @@ interface ProdState {
    * status to "offline" rather than throwing.
    */
   forceSync: () => Promise<void>;
+  /**
+   * Resolves a {@link pendingSync} prompt by pushing the unsynced local edits
+   * (and deletions) to the cloud, then re-pulling the merged canonical set.
+   */
+  applyPendingSync: () => Promise<void>;
+  /**
+   * Resolves a {@link pendingSync} prompt by discarding the local-only unsynced
+   * changes and adopting the cloud copy instead.
+   */
+  discardPendingSync: () => void;
+  /**
+   * Wipes the persisted local cache and resets in-memory state to empty. Called
+   * on explicit sign-out so no account data lingers on a shared device.
+   */
+  clearLocalData: () => void;
 
   // Timer actions
   startTimer: () => void;
@@ -1147,8 +1193,58 @@ function applyPushOutcome(outcome: SyncOutcome): void {
   }
 }
 
+/**
+ * Marks task ids as locally-dirty (unsynced) in the durable outbox. A re-edited
+ * id also drops out of the deletion outbox — it clearly exists again.
+ */
+function markUnsynced(ids: string[]): void {
+  useProdStore.setState((state) => {
+    const next = new Set(state.unsyncedTaskIds);
+    for (const id of ids) next.add(id);
+    return {
+      unsyncedTaskIds: [...next],
+      unsyncedDeletedIds: state.unsyncedDeletedIds.filter(
+        (d) => !ids.includes(d)
+      ),
+    };
+  });
+}
+
+/** Clears task ids from the unsynced outbox once their push is confirmed. */
+function clearUnsynced(ids: string[]): void {
+  useProdStore.setState((state) => ({
+    unsyncedTaskIds: state.unsyncedTaskIds.filter((id) => !ids.includes(id)),
+  }));
+}
+
+/**
+ * Builds a {@link PendingSync} when the outbox holds changes that a cloud
+ * overwrite would clobber. Returns null when there's nothing to protect (the
+ * common case), so the caller can adopt the cloud copy freely.
+ */
+function buildPendingSync(
+  state: ProdState,
+  cloudTasks: Task[]
+): PendingSync | null {
+  const unsyncedIds = state.unsyncedTaskIds;
+  const deletedIds = state.unsyncedDeletedIds;
+  const localOnly = state.tasks.filter((t) => unsyncedIds.includes(t.id));
+  // Only prompt when there's a real local change to review — either an
+  // edited/created task still present locally, or a pending deletion.
+  if (localOnly.length === 0 && deletedIds.length === 0) return null;
+  return {
+    cloudTasks,
+    localTasks: state.tasks,
+    unsyncedIds,
+    deletedIds,
+  };
+}
+
 function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
   if (!isSupabaseConfigured) return;
+  // Track the edit in the durable outbox first so it survives a reload/idle
+  // even if the debounced push below never lands (offline/expired token).
+  markUnsynced(taskIds);
   for (const id of taskIds) pendingTaskIds.add(id);
   if (pushTimer) clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
@@ -1158,7 +1254,12 @@ function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
     const tasks = getState().tasks.filter((task) => ids.has(task.id));
     if (tasks.length === 0) return;
     useProdStore.setState({ connectionStatus: "connecting" });
-    void pushTasks(tasks).then(applyPushOutcome);
+    void pushTasks(tasks).then((outcome) => {
+      applyPushOutcome(outcome);
+      // Only clear the outbox on a confirmed success — a failed push keeps the
+      // ids marked so the next reconnect can recover them.
+      if (outcome.ok) clearUnsynced([...ids]);
+    });
   }, 400);
 }
 
@@ -1207,6 +1308,9 @@ export const useProdStore = create<ProdState>()(
   // app is purely local, which we surface as "offline" (on-device data).
   connectionStatus: isSupabaseConfigured ? "connecting" : "offline",
   lastSyncError: null,
+  unsyncedTaskIds: [],
+  unsyncedDeletedIds: [],
+  pendingSync: null,
 
   mode: "focus",
   timeLeft: TIMER_DURATIONS.focus,
@@ -1318,10 +1422,24 @@ export const useProdStore = create<ProdState>()(
       tasks: state.tasks.filter((task) => task.id !== id),
       // Clear the focus selection if the active task is being removed.
       activeTaskId: state.activeTaskId === id ? null : state.activeTaskId,
+      // A deleted task is no longer an unsynced edit; record it as a pending
+      // deletion instead so the removal survives an offline gap.
+      unsyncedTaskIds: state.unsyncedTaskIds.filter((t) => t !== id),
+      unsyncedDeletedIds:
+        isSupabaseConfigured && !state.unsyncedDeletedIds.includes(id)
+          ? [...state.unsyncedDeletedIds, id]
+          : state.unsyncedDeletedIds,
     }));
     if (isSupabaseConfigured) {
       set({ connectionStatus: "connecting" });
-      void deleteTaskRemote(id).then(applyPushOutcome);
+      void deleteTaskRemote(id).then((outcome) => {
+        applyPushOutcome(outcome);
+        if (outcome.ok) {
+          set((state) => ({
+            unsyncedDeletedIds: state.unsyncedDeletedIds.filter((t) => t !== id),
+          }));
+        }
+      });
     }
   },
   reorderTasks: (activeId, overId) => {
@@ -1831,6 +1949,18 @@ export const useProdStore = create<ProdState>()(
         return;
       }
       if (cloudTasks.length > 0) {
+        // Guard unsynced local edits: if the durable outbox holds changes the
+        // cloud copy would clobber, pause and surface the sync-review modal
+        // instead of silently overwriting the user's offline work.
+        const guard = buildPendingSync(get(), cloudTasks);
+        if (guard) {
+          set({
+            pendingSync: guard,
+            connectionStatus: "error",
+            lastSyncError: "You have offline changes to review.",
+          });
+          return;
+        }
         // Cloud is the source of truth on subsequent devices/sessions.
         set({ tasks: cloudTasks });
       } else if (get().tasks.length > 0) {
@@ -1896,6 +2026,11 @@ export const useProdStore = create<ProdState>()(
     if (get().isSyncing) return;
     set({ isSyncing: true, connectionStatus: "connecting" });
     try {
+      // Renew the auth session up front so a wedged/expired token (after the tab
+      // sat idle) is refreshed before any read/write. This is what makes the
+      // "Reconnect" button recover instead of reusing the dead token.
+      await refreshSession();
+
       // Flush any debounced task edits first so local changes reach the cloud
       // before we overwrite local state with the pulled cloud copy.
       if (pushTimer !== null) {
@@ -1910,6 +2045,8 @@ export const useProdStore = create<ProdState>()(
             applyPushOutcome(outcome);
             return;
           }
+          // Confirmed — drop these from the outbox so they don't trip the guard.
+          clearUnsynced([...ids]);
         }
       }
 
@@ -1921,6 +2058,17 @@ export const useProdStore = create<ProdState>()(
         return;
       }
       if (cloudTasks.length > 0) {
+        // Guard unsynced local edits before overwriting: surface the review
+        // modal instead of clobbering offline work the push above couldn't land.
+        const guard = buildPendingSync(get(), cloudTasks);
+        if (guard) {
+          set({
+            pendingSync: guard,
+            connectionStatus: "error",
+            lastSyncError: "You have offline changes to review.",
+          });
+          return;
+        }
         // Adopt the cloud copy (persist middleware writes it to localStorage).
         set({ tasks: cloudTasks });
       } else if (get().tasks.length > 0) {
@@ -1957,6 +2105,77 @@ export const useProdStore = create<ProdState>()(
     } finally {
       set({ isSyncing: false });
     }
+  },
+
+  applyPendingSync: async () => {
+    const pending = get().pendingSync;
+    if (!pending) return;
+    set({ pendingSync: null, isSyncing: true, connectionStatus: "connecting" });
+    try {
+      await refreshSession();
+      await ensureUserRow();
+      // Push the unsynced local edits/creations that are still present locally.
+      const toPush = get().tasks.filter((t) =>
+        pending.unsyncedIds.includes(t.id)
+      );
+      if (toPush.length > 0) {
+        const outcome = await pushTasks(toPush);
+        if (!outcome.ok) {
+          applyPushOutcome(outcome);
+          // Keep the prompt (and the outbox) so the user can retry once the
+          // connection recovers — their offline work is never dropped.
+          set({ pendingSync: pending });
+          return;
+        }
+      }
+      // Propagate offline deletions.
+      for (const id of pending.deletedIds) {
+        await deleteTaskRemote(id);
+      }
+      // Outbox is flushed — clear it before adopting the merged cloud copy.
+      set({ unsyncedTaskIds: [], unsyncedDeletedIds: [] });
+      const merged = await pullTasks();
+      if (merged !== null) set({ tasks: merged });
+      set({ connectionStatus: "synced", lastSyncError: null });
+    } catch (error) {
+      console.error("[cadence] applyPendingSync failed", error);
+      // Restore the prompt so a transient failure doesn't strand the changes.
+      set({ pendingSync: pending, connectionStatus: "offline" });
+    } finally {
+      set({ isSyncing: false });
+    }
+  },
+
+  discardPendingSync: () => {
+    const pending = get().pendingSync;
+    if (!pending) return;
+    // Drop the local-only unsynced work and adopt the cloud copy wholesale.
+    set({
+      tasks: pending.cloudTasks,
+      unsyncedTaskIds: [],
+      unsyncedDeletedIds: [],
+      pendingSync: null,
+      connectionStatus: "synced",
+      lastSyncError: null,
+    });
+  },
+
+  clearLocalData: () => {
+    // Wipe the persisted cache, then reset in-memory state to empty so no
+    // account data lingers on the device after an explicit sign-out.
+    void useProdStore.persist.clearStorage();
+    set({
+      tasks: [],
+      categories: [],
+      goals: [],
+      activeTaskId: null,
+      history: {},
+      dailyPlan: null,
+      pendingReview: null,
+      unsyncedTaskIds: [],
+      unsyncedDeletedIds: [],
+      pendingSync: null,
+    });
   },
 
   startTimer: () => {
@@ -2049,6 +2268,10 @@ export const useProdStore = create<ProdState>()(
         history: state.history,
         dailyPlan: state.dailyPlan,
         pendingReview: state.pendingReview,
+        // Persist the offline outbox so unsynced work survives a reload/idle and
+        // can be recovered on the next reconnect. pendingSync is runtime-only.
+        unsyncedTaskIds: state.unsyncedTaskIds,
+        unsyncedDeletedIds: state.unsyncedDeletedIds,
       }),
     }
   )

@@ -12,6 +12,7 @@ import { OverdueReviewModal } from "@/components/overdue-review-modal";
 import { OverloadGuard } from "@/components/overload-guard";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { QuickAddModal } from "@/components/quick-add-modal";
+import { SyncReviewModal } from "@/components/sync-review-modal";
 import { Toaster } from "@/components/toaster";
 
 const geistSans = Geist({
@@ -75,6 +76,7 @@ export default function RootLayout({
         <DailyPlanManager />
         <OverdueReviewModal />
         <OverloadGuard />
+        <SyncReviewModal />
         <NotificationManager />
         <ConnectionStatus />
         <DebugPanel />

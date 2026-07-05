@@ -89,6 +89,29 @@ export function setCurrentUser(
   _cachedUserEmail = email ?? undefined;
 }
 
+/**
+ * Renews the auth session and re-caches the identity. `getSession()` returns the
+ * stored session and transparently refreshes the access token when it's expired,
+ * so calling this before a sync heals a wedged/expired token — which is what
+ * makes the "Reconnect" button actually recover instead of reusing a dead token.
+ * Returns `true` when a valid session is in hand, `false` when signed out.
+ */
+export async function refreshSession(): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+  try {
+    const { data, error } = await withTimeout(
+      supabase.auth.getSession(),
+      "refresh session"
+    );
+    if (error || !data.session) return false;
+    setCurrentUser(data.session.user.id, data.session.user.email);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* ----------------------------- error helpers ----------------------------- */
 
 /**

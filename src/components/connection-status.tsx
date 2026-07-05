@@ -33,6 +33,7 @@ export function ConnectionStatus() {
   const status = useProdStore((state) => state.connectionStatus);
   const lastSyncError = useProdStore((state) => state.lastSyncError);
   const forceSync = useProdStore((state) => state.forceSync);
+  const clearLocalData = useProdStore((state) => state.clearLocalData);
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,6 +64,9 @@ export function ConnectionStatus() {
     setOpen(false);
     const supabase = getSupabaseClient();
     if (supabase) await supabase.auth.signOut();
+    // Wipe the on-device cache on explicit sign-out so no account data lingers
+    // on a shared device (and no stale unsynced outbox carries into a re-link).
+    clearLocalData();
     router.replace("/login");
     router.refresh();
   };
