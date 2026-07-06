@@ -54,6 +54,7 @@ import {
   Tags,
   Target,
   Timer,
+  TriangleAlert,
   Trash2,
   X,
 } from "lucide-react";
@@ -311,6 +312,12 @@ function formatCompactDeadline(deadline: string): string {
   const iso = toDateInputValue(deadline);
   if (!iso) return "";
   return format(parseISO(iso), "d MMM");
+}
+
+/** True when a task has a valid deadline strictly before today (yyyy-MM-dd). */
+function isOverdueTask(deadline: string, todayIso: string): boolean {
+  const iso = toDateInputValue(deadline);
+  return !!iso && iso < todayIso;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1980,6 +1987,9 @@ export default function BoardPage() {
   };
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  // Narrow the board to just past-due tasks so the user can triage slippage
+  // without scanning every column. Stacks on top of the status/category filters.
+  const [overdueOnly, setOverdueOnly] = useState(false);
   // Narrow the board to a single main job category so the user can focus on one
   // area at a time. "all" shows every category.
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -2159,6 +2169,7 @@ export default function BoardPage() {
   const dragEnabled =
     statusFilter === "all" &&
     categoryFilter === "all" &&
+    !overdueOnly &&
     sortDirection === "none" &&
     categorySort === "none";
 
@@ -2177,12 +2188,18 @@ export default function BoardPage() {
       statusFilter === "all"
         ? boardTasks
         : boardTasks.filter((task) => task.status === statusFilter);
-    const filtered =
+    const byCategory =
       categoryFilter === "all"
         ? byStatus
         : byStatus.filter(
             (task) => (task.category.trim() || "General") === categoryFilter
           );
+
+    // Overdue-only view: keep just the tasks whose deadline has already passed.
+    const todayIso = format(new Date(), "yyyy-MM-dd");
+    const filtered = overdueOnly
+      ? byCategory.filter((task) => isOverdueTask(task.deadline, todayIso))
+      : byCategory;
 
     // Category sort takes precedence when active. Group by main category, then
     // by sub-category so related jobs cluster together as you scroll.
@@ -2204,7 +2221,7 @@ export default function BoardPage() {
       const diff = PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority];
       return sortDirection === "desc" ? diff : -diff;
     });
-  }, [tasks, statusFilter, categoryFilter, sortDirection, categorySort]);
+  }, [tasks, statusFilter, categoryFilter, overdueOnly, sortDirection, categorySort]);
 
   // Category options for the filter dropdown: every managed column plus any
   // orphan category present on a task but not yet in the managed list.
@@ -2602,6 +2619,24 @@ export default function BoardPage() {
             );
           })}
 
+          {/* Overdue-only toggle — sits apart from the status pills since it
+              stacks on top of whichever status/category filter is active. */}
+          <button
+            type="button"
+            onClick={() => setOverdueOnly((v) => !v)}
+            aria-pressed={overdueOnly}
+            title="Show only past-due tasks"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors",
+              overdueOnly
+                ? "border-[#9b3b3b]/30 bg-[#f6e0e0] text-[#9b3b3b]"
+                : "border-[var(--c-line)] bg-[var(--c-panel-soft)] text-[var(--c-ink-3)] hover:bg-[#f6e0e0] hover:text-[#9b3b3b]"
+            )}
+          >
+            <TriangleAlert className="size-3.5" />
+            Overdue
+          </button>
+
           {/* Zoom control — scale the board down to fit more on screen. */}
           <div className="ml-auto flex items-center gap-0.5 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-1">
             <button
@@ -2682,11 +2717,11 @@ export default function BoardPage() {
           </div>
         )}
 
-        {(statusFilter !== "all" || categoryFilter !== "all") &&
+        {(statusFilter !== "all" || categoryFilter !== "all" || overdueOnly) &&
         visibleTasks.length === 0 &&
         tasks.length > 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-14 text-center text-sm text-[var(--c-dim)]">
-            No tasks match this filter.
+            {overdueOnly ? "Nothing overdue — you're all caught up. ✨" : "No tasks match this filter."}
           </div>
         ) : (
           // One board-wide DnD context so cards can be dragged across category

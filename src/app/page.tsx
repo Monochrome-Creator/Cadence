@@ -35,6 +35,7 @@ import {
   Target,
   Timer,
   TriangleAlert,
+  X,
 } from "lucide-react";
 
 import {
@@ -402,6 +403,9 @@ function FocusRow({
 }) {
   const updateTask = useProdStore((state) => state.updateTask);
   const removeTaskFromToday = useProdStore((state) => state.removeTaskFromToday);
+  const completeAndRepeatTask = useProdStore(
+    (state) => state.completeAndRepeatTask
+  );
   const theme = categoryTheme(task.category);
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
@@ -524,6 +528,25 @@ function FocusRow({
           </span>
         </span>
 
+        {/* Mark done — complete straight from Today's focus. The task then
+            leaves the focus list (slashed) and drops into Completed Today; a
+            recurring task instead repeats to its next occurrence. */}
+        {!done && (
+          <button
+            type="button"
+            onClick={() =>
+              task.recurrence !== "none"
+                ? completeAndRepeatTask(task.id)
+                : updateTask(task.id, { status: "Done" })
+            }
+            title="Mark done"
+            aria-label="Mark done"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#eef0e7] text-[#5f6b4a] transition-colors hover:bg-[#e3e8d6]"
+          >
+            <Check className="size-4" strokeWidth={2.5} />
+          </button>
+        )}
+
         {/* This Evening toggle — moves the task between day and after-hours */}
         {!done && (
           <button
@@ -552,6 +575,20 @@ function FocusRow({
             className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
           >
             <SunDim className="size-4" />
+          </button>
+        )}
+
+        {/* Clear from today — dismiss a completed task so it leaves the
+            dashboard (it stays Done in the Workspace, just off Today's list). */}
+        {done && (
+          <button
+            type="button"
+            onClick={() => removeTaskFromToday(task.id)}
+            title="Clear from today"
+            aria-label="Clear from today"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[var(--c-beige)] hover:text-[#a35d4d]"
+          >
+            <X className="size-4" />
           </button>
         )}
 
