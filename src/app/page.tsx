@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -396,16 +397,15 @@ function FocusRow({
   task,
   isActive,
   onToggle,
+  onComplete,
 }: {
   task: Task;
   isActive: boolean;
   onToggle: () => void;
+  onComplete: (task: Task) => void;
 }) {
   const updateTask = useProdStore((state) => state.updateTask);
   const removeTaskFromToday = useProdStore((state) => state.removeTaskFromToday);
-  const completeAndRepeatTask = useProdStore(
-    (state) => state.completeAndRepeatTask
-  );
   const theme = categoryTheme(task.category);
   const done = task.status === "Done";
   const deadline = formatDeadline(task.deadline);
@@ -534,11 +534,7 @@ function FocusRow({
         {!done && (
           <button
             type="button"
-            onClick={() =>
-              task.recurrence !== "none"
-                ? completeAndRepeatTask(task.id)
-                : updateTask(task.id, { status: "Done" })
-            }
+            onClick={() => onComplete(task)}
             title="Mark done"
             aria-label="Mark done"
             className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#eef0e7] text-[#5f6b4a] transition-colors hover:bg-[#e3e8d6]"
@@ -1043,6 +1039,111 @@ function DeadlineAlerts({
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/*                     This week's behaviours — focus strip                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A lightweight bridge from the Goals-page Mandala into the daily flow: lists
+ * the behaviours the user flagged "active this week" that aren't done today,
+ * each a one-tap done. When Balance flags a neglected pillar, it also surfaces
+ * one low-friction behaviour from that pillar to try. Renders nothing when
+ * there's nothing to nudge.
+ */
+function WeekBehavioursStrip({
+  today,
+  neglected,
+}: {
+  today: string;
+  neglected: LifePillar | null;
+}) {
+  const themes = useProdStore((s) => s.themes);
+  const completeBehaviour = useProdStore((s) => s.completeBehaviour);
+
+  const active = useMemo(
+    () =>
+      themes.flatMap((t) =>
+        t.behaviours
+          .filter((b) => b.activeThisWeek && b.lastCompletedDate !== today)
+          .map((b) => ({ themeId: t.id, behaviour: b }))
+      ),
+    [themes, today]
+  );
+
+  // For the most-neglected pillar, surface one low-friction behaviour to try —
+  // preferring a short, non-recurring action not already flagged for the week.
+  const suggestion = useMemo(() => {
+    if (!neglected) return null;
+    const activeIds = new Set(active.map((a) => a.behaviour.id));
+    const candidates = themes
+      .filter((t) => t.lifePillar === neglected)
+      .flatMap((t) =>
+        t.behaviours
+          .filter((b) => b.lastCompletedDate !== today && !activeIds.has(b.id))
+          .map((b) => ({ themeId: t.id, behaviour: b }))
+      );
+    if (candidates.length === 0) return null;
+    return [...candidates].sort((a, b) => {
+      const ar = a.behaviour.recurring ? 1 : 0;
+      const br = b.behaviour.recurring ? 1 : 0;
+      if (ar !== br) return ar - br;
+      return a.behaviour.title.length - b.behaviour.title.length;
+    })[0];
+  }, [themes, neglected, today, active]);
+
+  if (active.length === 0 && !suggestion) return null;
+
+  return (
+    <div className="mt-6 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Sparkles className="size-4 text-[#a35d4d]" />
+        <h3 className="text-[13px] font-semibold tracking-[0.04em] text-[var(--c-dim)] uppercase">
+          This week&rsquo;s behaviours
+        </h3>
+      </div>
+      {active.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {active.map(({ themeId, behaviour }) => (
+            <button
+              key={behaviour.id}
+              type="button"
+              onClick={() => completeBehaviour(themeId, behaviour.id)}
+              title="Mark done today"
+              className="group inline-flex items-center gap-1.5 rounded-full border border-[#a35d4d]/30 bg-[var(--c-panel)] py-1 pr-3 pl-1 text-[12.5px] font-medium text-[var(--c-ink-2)] transition-colors hover:bg-[#f6e6da]"
+            >
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--c-beige)] text-[var(--c-dim)] transition-colors group-hover:bg-[#6f9e6a] group-hover:text-white">
+                <Check className="size-3" strokeWidth={3} />
+              </span>
+              {behaviour.title}
+            </button>
+          ))}
+        </div>
+      )}
+      {suggestion && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-dashed border-[var(--c-line)] pt-3 text-[12.5px] text-[var(--c-dim)]">
+          <span>
+            {neglected ? PILLAR_THEME[neglected].label : "This area"} could use
+            some attention — try:
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              completeBehaviour(suggestion.themeId, suggestion.behaviour.id)
+            }
+            title="Mark done today"
+            className="group inline-flex items-center gap-1.5 rounded-full border border-dashed border-[var(--c-line-strong)] py-1 pr-3 pl-1 font-medium text-[var(--c-ink-2)] transition-colors hover:border-[#6f9e6a]/50 hover:bg-[#eef3e9]"
+          >
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--c-beige)] text-[var(--c-dim)] transition-colors group-hover:bg-[#6f9e6a] group-hover:text-white">
+              <Check className="size-3" strokeWidth={3} />
+            </span>
+            {suggestion.behaviour.title}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const tasks = useProdStore((state) => state.tasks);
   const goals = useProdStore((state) => state.goals);
@@ -1051,6 +1152,48 @@ export default function HomePage() {
   const escalatePriority = useProdStore((state) => state.escalatePriority);
   const sessionsCompleted = useProdStore((state) => state.sessionsCompleted);
   const history = useProdStore((state) => state.history);
+  const updateTask = useProdStore((state) => state.updateTask);
+  const completeAndRepeatTask = useProdStore(
+    (state) => state.completeAndRepeatTask
+  );
+
+  // Completing a task in Today's focus flips it to Done immediately, but we keep
+  // it on-screen (slashed) for a brief beat so the completion reads as a
+  // deliberate strike-through before the row auto-hides into "Completed Today".
+  const [recentlyDone, setRecentlyDone] = useState<Set<string>>(
+    () => new Set()
+  );
+  const doneTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+  const handleComplete = useCallback(
+    (task: Task) => {
+      if (task.recurrence !== "none") {
+        completeAndRepeatTask(task.id);
+      } else {
+        updateTask(task.id, { status: "Done" });
+      }
+      setRecentlyDone((prev) => new Set(prev).add(task.id));
+      const existing = doneTimers.current.get(task.id);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        setRecentlyDone((prev) => {
+          const next = new Set(prev);
+          next.delete(task.id);
+          return next;
+        });
+        doneTimers.current.delete(task.id);
+      }, 1100);
+      doneTimers.current.set(task.id, timer);
+    },
+    [completeAndRepeatTask, updateTask]
+  );
+  useEffect(() => {
+    const timers = doneTimers.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+    };
+  }, []);
 
   const { name, editableValue, canEdit, saveName } = useGreetingName();
   // Inline editing of the greeting name.
@@ -1107,6 +1250,15 @@ export default function HomePage() {
     return totals;
   }, [now, history]);
 
+  // Mirror the Balance widget's neglect logic so the behaviours strip can nudge
+  // toward the least-attended pillar (only once there's enough activity).
+  const neglectedPillar = useMemo(() => {
+    const sum = PILLAR_ORDER.reduce((acc, p) => acc + pillarTotals[p], 0);
+    return sum >= 3
+      ? [...PILLAR_ORDER].sort((a, b) => pillarTotals[a] - pillarTotals[b])[0]
+      : null;
+  }, [pillarTotals]);
+
   // Rank tasks by importance so the dashboard can surface what matters now
   // rather than the whole board: the pinned focus task leads, then incomplete
   // work, then higher priority, then the nearest deadline.
@@ -1118,8 +1270,10 @@ export default function HomePage() {
     return [...tasks].sort((a, b) => {
       if (a.id === activeTaskId) return -1;
       if (b.id === activeTaskId) return 1;
-      const aDone = a.status === "Done" ? 1 : 0;
-      const bDone = b.status === "Done" ? 1 : 0;
+      // A task in its post-completion grace window ranks as if still active so
+      // it holds its slot (slashed) instead of jumping to the bottom.
+      const aDone = a.status === "Done" && !recentlyDone.has(a.id) ? 1 : 0;
+      const bDone = b.status === "Done" && !recentlyDone.has(b.id) ? 1 : 0;
       if (aDone !== bDone) return aDone - bDone;
       if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority]) {
         return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
@@ -1129,7 +1283,7 @@ export default function HomePage() {
       if (aDl !== bDl) return aDl - bDl;
       return a.order - b.order;
     });
-  }, [tasks, activeTaskId]);
+  }, [tasks, activeTaskId, recentlyDone]);
 
   // Strict GTD Daily Action list: the dashboard surfaces ONLY tasks the user
   // explicitly promoted from the Workspace via "Send to Today" (isToday). The
@@ -1139,13 +1293,21 @@ export default function HomePage() {
   const activeTasks = useMemo(
     () =>
       rankedTasks.filter(
-        (t) => t.isToday && t.status !== "Done" && t.status !== "Inbox"
+        (t) =>
+          t.isToday &&
+          t.status !== "Inbox" &&
+          // Keep a just-completed task in the focus list, slashed, until its
+          // grace window ends — then it drops into "Completed Today".
+          (t.status !== "Done" || recentlyDone.has(t.id))
       ),
-    [rankedTasks]
+    [rankedTasks, recentlyDone]
   );
   const completedTasks = useMemo(
-    () => rankedTasks.filter((t) => t.isToday && t.status === "Done"),
-    [rankedTasks]
+    () =>
+      rankedTasks.filter(
+        (t) => t.isToday && t.status === "Done" && !recentlyDone.has(t.id)
+      ),
+    [rankedTasks, recentlyDone]
   );
 
   // Daytime vs. after-hours: evening tasks render under their own "This Evening"
@@ -1311,6 +1473,7 @@ export default function HomePage() {
                   task={task}
                   isActive={task.id === activeTaskId}
                   onToggle={() => toggle(task.id)}
+                  onComplete={handleComplete}
                 />
               ))}
             </div>
@@ -1351,10 +1514,19 @@ export default function HomePage() {
                     task={task}
                     isActive={task.id === activeTaskId}
                     onToggle={() => toggle(task.id)}
+                    onComplete={handleComplete}
                   />
                 ))}
               </div>
             </div>
+          )}
+
+          {/* This week's behaviours — one-tap logging from the Mandala */}
+          {now && (
+            <WeekBehavioursStrip
+              today={format(now, "yyyy-MM-dd")}
+              neglected={neglectedPillar}
+            />
           )}
         </section>
 
@@ -1398,6 +1570,7 @@ export default function HomePage() {
                     task={task}
                     isActive={task.id === activeTaskId}
                     onToggle={() => toggle(task.id)}
+                    onComplete={handleComplete}
                   />
                 ))}
               </div>

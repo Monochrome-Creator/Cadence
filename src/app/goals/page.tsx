@@ -1,23 +1,30 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format, isValid, parseISO } from "date-fns";
 import {
   CalendarDays,
   Check,
   ChevronDown,
+  Grid3x3,
+  LayoutList,
   Plus,
   Sparkles,
+  Star,
   Target,
   Trash2,
   Trophy,
+  X,
 } from "lucide-react";
 
 import {
   useProdStore,
+  type Behaviour,
   type Goal,
   type LifePillar,
+  type Theme,
 } from "@/store/use-prod-store";
+import { useToastStore } from "@/store/use-toast";
 import { PILLAR_ORDER, PILLAR_THEME } from "@/lib/life-pillars";
 import { cn } from "@/lib/utils";
 
@@ -404,6 +411,616 @@ function GoalCard({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                          Pillar behaviours (Mandala)                        */
+/* -------------------------------------------------------------------------- */
+
+/** Local `yyyy-MM-dd` for "completed today" checks (client-only component). */
+function todayKey(): string {
+  return format(new Date(), "yyyy-MM-dd");
+}
+
+/**
+ * Maps a 0..8 cell index within a 3×3 block to its 0..7 behaviour/theme slot,
+ * skipping the centre (index 4 → -1). The same map places the 8 outer blocks
+ * around the centre and the 8 theme labels inside the centre block, so one
+ * lookup drives the whole 9×9 layout deterministically.
+ */
+const SLOT_BY_CELL = [0, 1, 2, 3, -1, 4, 5, 6, 7] as const;
+
+/* ------------------------------- chips view ------------------------------- */
+
+function BehaviourChip({
+  themeId,
+  behaviour,
+  today,
+}: {
+  themeId: string;
+  behaviour: Behaviour;
+  today: string;
+}) {
+  const updateBehaviour = useProdStore((s) => s.updateBehaviour);
+  const deleteBehaviour = useProdStore((s) => s.deleteBehaviour);
+  const toggleBehaviourActive = useProdStore((s) => s.toggleBehaviourActive);
+  const completeBehaviour = useProdStore((s) => s.completeBehaviour);
+  const undoDeleteMandala = useProdStore((s) => s.undoDeleteMandala);
+  const showToast = useToastStore((s) => s.showToast);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(behaviour.title);
+  const doneToday = behaviour.lastCompletedDate === today;
+
+  const commit = () => {
+    const t = draft.trim();
+    if (t) updateBehaviour(themeId, behaviour.id, { title: t });
+    else setDraft(behaviour.title);
+    setEditing(false);
+  };
+  const handleDelete = () => {
+    deleteBehaviour(themeId, behaviour.id);
+    showToast({
+      message: `Deleted “${behaviour.title}”`,
+      action: { label: "Undo", onClick: undoDeleteMandala },
+    });
+  };
+
+  return (
+    <span
+      className={cn(
+        "group inline-flex items-center gap-1.5 rounded-full border py-1 pr-2 pl-1 text-[12.5px]",
+        behaviour.activeThisWeek
+          ? "border-[#a35d4d]/40 bg-[#f6e6da]"
+          : "border-[var(--c-line)] bg-[var(--c-panel-soft)]",
+        doneToday && "opacity-60"
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => completeBehaviour(themeId, behaviour.id)}
+        title="Mark done today"
+        aria-label="Mark done today"
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded-full transition-colors",
+          doneToday
+            ? "bg-[#6f9e6a] text-white"
+            : "bg-[var(--c-beige)] text-[var(--c-dim)] hover:text-[#6f9e6a]"
+        )}
+      >
+        <Check className="size-3" strokeWidth={3} />
+      </button>
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setDraft(behaviour.title);
+              setEditing(false);
+            }
+          }}
+          maxLength={60}
+          className="w-32 rounded-md border border-[#a35d4d]/40 bg-[var(--c-panel)] px-1.5 py-0.5 text-[12.5px] text-[var(--c-ink-2)] outline-none"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className={cn(
+            "max-w-[12rem] truncate text-left text-[var(--c-ink-2)]",
+            doneToday && "line-through"
+          )}
+        >
+          {behaviour.title}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => toggleBehaviourActive(themeId, behaviour.id)}
+        title={behaviour.activeThisWeek ? "Active this week" : "Mark active this week"}
+        aria-pressed={!!behaviour.activeThisWeek}
+        className={cn(
+          "flex size-4 shrink-0 items-center justify-center transition-colors",
+          behaviour.activeThisWeek
+            ? "text-[#a35d4d]"
+            : "text-[var(--c-faint)] hover:text-[#a35d4d]"
+        )}
+      >
+        <Star
+          className="size-3.5"
+          fill={behaviour.activeThisWeek ? "currentColor" : "none"}
+        />
+      </button>
+      <button
+        type="button"
+        onClick={handleDelete}
+        title="Delete behaviour"
+        aria-label="Delete behaviour"
+        className="flex size-4 shrink-0 items-center justify-center text-[var(--c-faint)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[#9b3b3b]"
+      >
+        <X className="size-3.5" />
+      </button>
+    </span>
+  );
+}
+
+function ThemeCard({ theme, today }: { theme: Theme; today: string }) {
+  const updateTheme = useProdStore((s) => s.updateTheme);
+  const deleteTheme = useProdStore((s) => s.deleteTheme);
+  const addBehaviour = useProdStore((s) => s.addBehaviour);
+  const undoDeleteMandala = useProdStore((s) => s.undoDeleteMandala);
+  const showToast = useToastStore((s) => s.showToast);
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(theme.title);
+  const [adding, setAdding] = useState(false);
+  const [behDraft, setBehDraft] = useState("");
+
+  const handleDelete = () => {
+    deleteTheme(theme.id);
+    showToast({
+      message: `Deleted “${theme.title}”`,
+      action: { label: "Undo", onClick: undoDeleteMandala },
+    });
+  };
+
+  const pillar = theme.lifePillar ? PILLAR_THEME[theme.lifePillar] : null;
+  const behaviours = useMemo(
+    () => [...theme.behaviours].sort((a, b) => a.order - b.order),
+    [theme.behaviours]
+  );
+
+  const commitTitle = () => {
+    const t = draft.trim();
+    if (t) updateTheme(theme.id, { title: t });
+    else setDraft(theme.title);
+    setEditing(false);
+  };
+  const commitBehaviour = () => {
+    const t = behDraft.trim();
+    if (t) addBehaviour(theme.id, t);
+    setBehDraft("");
+    setAdding(false);
+  };
+
+  return (
+    <div
+      className="flex flex-col gap-3 rounded-3xl border border-l-4 border-[var(--c-line)] bg-[var(--c-panel)] p-5 shadow-[0_1px_4px_rgba(74,64,54,0.05)]"
+      style={{ borderLeftColor: pillar ? pillar.fill : "var(--c-line-strong)" }}
+    >
+      {/* Header */}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") {
+                  setDraft(theme.title);
+                  setEditing(false);
+                }
+              }}
+              maxLength={40}
+              className="w-full rounded-lg border border-[#a35d4d]/40 bg-[var(--c-panel-soft)] px-2.5 py-1 text-[15px] font-semibold text-[var(--c-ink-2)] outline-none"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="text-left text-[15px] font-semibold text-[var(--c-ink-2)] hover:underline decoration-dashed underline-offset-2"
+            >
+              {theme.title}
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleDelete}
+          title="Delete theme"
+          aria-label="Delete theme"
+          className="flex size-7 shrink-0 items-center justify-center rounded-full text-[var(--c-faint)] transition-colors hover:bg-[#f6e0e0] hover:text-[#9b3b3b]"
+        >
+          <Trash2 className="size-4" />
+        </button>
+      </div>
+
+      {/* Pillar tag */}
+      <PillarPicker
+        value={theme.lifePillar}
+        onChange={(next) => updateTheme(theme.id, { lifePillar: next })}
+      />
+
+      {/* Behaviour chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        {behaviours.map((b) => (
+          <BehaviourChip
+            key={b.id}
+            themeId={theme.id}
+            behaviour={b}
+            today={today}
+          />
+        ))}
+        {adding ? (
+          <input
+            autoFocus
+            value={behDraft}
+            onChange={(e) => setBehDraft(e.target.value)}
+            onBlur={commitBehaviour}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setBehDraft("");
+                setAdding(false);
+              }
+            }}
+            placeholder="New behaviour…"
+            maxLength={60}
+            className="w-40 rounded-full border border-[#a35d4d]/40 bg-[var(--c-panel-soft)] px-3 py-1 text-[12.5px] text-[var(--c-ink-2)] placeholder:text-[var(--c-dim)] outline-none"
+          />
+        ) : (
+          behaviours.length < 8 && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--c-line-strong)] px-2.5 py-1 text-[12px] font-medium text-[var(--c-dim)] transition-colors hover:border-[#a35d4d]/50 hover:text-[#a35d4d]"
+            >
+              <Plus className="size-3" />
+              Behaviour
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------- grid view -------------------------------- */
+
+function MandalaGrid({
+  themes,
+  core,
+  today,
+}: {
+  themes: Theme[];
+  core: string;
+  today: string;
+}) {
+  const completeBehaviour = useProdStore((s) => s.completeBehaviour);
+  const themeByOrder = useMemo(
+    () => new Map(themes.map((t) => [t.order, t] as const)),
+    [themes]
+  );
+
+  const cells: React.ReactNode[] = [];
+  for (let r = 0; r < 9; r++) {
+    for (let c = 0; c < 9; c++) {
+      const blockRow = Math.floor(r / 3);
+      const blockCol = Math.floor(c / 3);
+      const inCell = (r % 3) * 3 + (c % 3);
+      const key = `${r}-${c}`;
+      const base =
+        "flex aspect-square items-center justify-center rounded-md border p-0.5 text-center text-[9px] leading-tight break-words";
+
+      if (blockRow === 1 && blockCol === 1) {
+        // Centre block: core + the 8 theme labels around it.
+        if (inCell === 4) {
+          cells.push(
+            <div
+              key={key}
+              className={cn(
+                base,
+                "border-[#a35d4d]/40 bg-[#f6e6da] font-semibold text-[#8f4f41]"
+              )}
+              title={core || "Set your central focus below"}
+            >
+              {core || "Core"}
+            </div>
+          );
+          continue;
+        }
+        const theme = themeByOrder.get(SLOT_BY_CELL[inCell]);
+        const p = theme?.lifePillar ? PILLAR_THEME[theme.lifePillar] : null;
+        cells.push(
+          <div
+            key={key}
+            className={cn(
+              base,
+              theme
+                ? "font-semibold text-[var(--c-ink-2)]"
+                : "border-dashed border-[var(--c-faint)] text-[var(--c-faint)]"
+            )}
+            style={{
+              backgroundColor: p ? `${p.fill}33` : "var(--c-panel-soft)",
+              borderColor: p ? `${p.fill}66` : undefined,
+            }}
+            title={theme?.title}
+          >
+            {theme ? theme.title : ""}
+          </div>
+        );
+        continue;
+      }
+
+      // Outer block: its centre mirrors the theme title; the rest are actions.
+      const order = SLOT_BY_CELL[blockRow * 3 + blockCol];
+      const theme = themeByOrder.get(order);
+      const p = theme?.lifePillar ? PILLAR_THEME[theme.lifePillar] : null;
+
+      if (inCell === 4) {
+        cells.push(
+          <div
+            key={key}
+            className={cn(
+              base,
+              theme
+                ? "font-semibold text-[var(--c-ink-2)]"
+                : "border-dashed border-[var(--c-faint)] text-[var(--c-faint)]"
+            )}
+            style={{
+              backgroundColor: p ? `${p.fill}33` : "var(--c-panel-soft)",
+              borderColor: p ? `${p.fill}66` : undefined,
+            }}
+            title={theme?.title}
+          >
+            {theme ? theme.title : ""}
+          </div>
+        );
+        continue;
+      }
+
+      const beh = theme?.behaviours.find((b) => b.order === SLOT_BY_CELL[inCell]);
+      const doneToday = beh?.lastCompletedDate === today;
+      cells.push(
+        beh ? (
+          <button
+            key={key}
+            type="button"
+            onClick={() => completeBehaviour(theme!.id, beh.id)}
+            title={`${beh.title}${doneToday ? " — done today" : " — tap to mark done"}`}
+            className={cn(
+              base,
+              "transition-colors",
+              doneToday
+                ? "border-[#6f9e6a]/50 bg-[#eef3e9] text-[var(--c-dim)] line-through"
+                : "border-[var(--c-line)] bg-[var(--c-panel)] text-[var(--c-ink-3)] hover:border-[#a35d4d]/40 hover:bg-[var(--c-beige-2)]",
+              beh.activeThisWeek && !doneToday && "ring-1 ring-[#a35d4d]/40"
+            )}
+          >
+            {beh.title}
+          </button>
+        ) : (
+          <div
+            key={key}
+            className={cn(
+              base,
+              "border-dashed border-[var(--c-faint)] bg-[var(--c-panel-soft)]"
+            )}
+          />
+        )
+      );
+    }
+  }
+
+  return (
+    <>
+      {/* The 9×9 grid needs room to breathe — desktop only. */}
+      <div className="hidden md:block">
+        <div className="mx-auto grid max-w-2xl grid-cols-9 gap-1">{cells}</div>
+        <p className="mt-3 text-center text-[12px] text-[var(--c-dim)]">
+          Tap an action cell to mark it done today. Add or edit behaviours in the
+          list view.
+        </p>
+      </div>
+      <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] px-4 py-8 text-center text-[13px] text-[var(--c-dim)] md:hidden">
+        The 64-box grid is best on a larger screen. Switch to the list view to
+        manage your behaviours here.
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------ orchestrator ------------------------------ */
+
+function MandalaSection() {
+  const themes = useProdStore((s) => s.themes);
+  const mandalaCore = useProdStore((s) => s.mandalaCore);
+  const setMandalaCore = useProdStore((s) => s.setMandalaCore);
+  const addTheme = useProdStore((s) => s.addTheme);
+  const undoDeleteMandala = useProdStore((s) => s.undoDeleteMandala);
+  const showToast = useToastStore((s) => s.showToast);
+
+  const [view, setView] = useState<"chips" | "grid">("chips");
+  const [editingCore, setEditingCore] = useState(false);
+  const [coreDraft, setCoreDraft] = useState(mandalaCore);
+  const [addingTheme, setAddingTheme] = useState(false);
+  const [themeDraft, setThemeDraft] = useState("");
+
+  const today = todayKey();
+  const sortedThemes = useMemo(
+    () => [...themes].sort((a, b) => a.order - b.order),
+    [themes]
+  );
+
+  // Cmd/Ctrl+Z restores the last deleted theme or behaviour. Scoped to this
+  // page (the only place Mandala deletes happen) and skipped while typing so it
+  // never hijacks native text undo inside inputs.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isUndo =
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        (e.key === "z" || e.key === "Z");
+      if (!isUndo) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      if (useProdStore.getState().deletedMandala.length === 0) return;
+      e.preventDefault();
+      undoDeleteMandala();
+      showToast({ message: "Restored" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [undoDeleteMandala, showToast]);
+
+  const commitCore = () => {
+    setMandalaCore(coreDraft.trim());
+    setEditingCore(false);
+  };
+  const commitTheme = () => {
+    const t = themeDraft.trim();
+    if (t) addTheme(t);
+    setThemeDraft("");
+    setAddingTheme(false);
+  };
+
+  return (
+    <section className="mt-4 flex flex-col gap-4 border-t border-[var(--c-line)] pt-8">
+      {/* Header + view toggle */}
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[#eef3e9] text-[#6f9e6a]">
+            <Grid3x3 className="size-5" />
+          </span>
+          <div>
+            <h2 className="font-heading text-2xl font-semibold tracking-tight text-[var(--c-ink-2)]">
+              Pillar behaviours
+            </h2>
+            <p className="mt-0.5 text-[14px] text-[var(--c-ink-3)]">
+              What “winning” looks like — grouped into themes, one tap to log.
+            </p>
+          </div>
+        </div>
+        <div className="inline-flex items-center gap-1 rounded-full border border-[var(--c-line)] bg-[var(--c-panel-soft)] p-1">
+          <button
+            type="button"
+            onClick={() => setView("chips")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+              view === "chips"
+                ? "bg-[#a35d4d] text-white"
+                : "text-[var(--c-dim)] hover:text-[var(--c-ink-2)]"
+            )}
+          >
+            <LayoutList className="size-3.5" />
+            List
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("grid")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+              view === "grid"
+                ? "bg-[#a35d4d] text-white"
+                : "text-[var(--c-dim)] hover:text-[var(--c-ink-2)]"
+            )}
+          >
+            <Grid3x3 className="size-3.5" />
+            Grid
+          </button>
+        </div>
+      </div>
+
+      {/* Mandala core (central focus) */}
+      <div className="flex items-center gap-3 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel-soft)] px-4 py-3">
+        <span className="text-[12px] font-semibold tracking-[0.04em] text-[var(--c-dim)] uppercase">
+          Core
+        </span>
+        {editingCore ? (
+          <input
+            autoFocus
+            value={coreDraft}
+            onChange={(e) => setCoreDraft(e.target.value)}
+            onBlur={commitCore}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setCoreDraft(mandalaCore);
+                setEditingCore(false);
+              }
+            }}
+            placeholder="Your central focus…"
+            maxLength={60}
+            className="flex-1 rounded-lg border border-[#a35d4d]/40 bg-[var(--c-panel)] px-3 py-1.5 text-[14px] font-medium text-[var(--c-ink-2)] outline-none"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setCoreDraft(mandalaCore);
+              setEditingCore(true);
+            }}
+            className={cn(
+              "flex-1 text-left text-[14px] font-medium hover:underline decoration-dashed underline-offset-2",
+              mandalaCore ? "text-[var(--c-ink-2)]" : "text-[var(--c-dim)]"
+            )}
+          >
+            {mandalaCore || "Set your central focus"}
+          </button>
+        )}
+      </div>
+
+      {/* Views */}
+      {sortedThemes.length === 0 && !addingTheme ? (
+        <div className="rounded-2xl border border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-12 text-center text-sm text-[var(--c-dim)]">
+          No themes yet. Add up to 8 life themes, each with the behaviours that
+          define progress.
+        </div>
+      ) : view === "grid" ? (
+        <MandalaGrid themes={sortedThemes} core={mandalaCore} today={today} />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {sortedThemes.map((theme) => (
+            <ThemeCard key={theme.id} theme={theme} today={today} />
+          ))}
+        </div>
+      )}
+
+      {/* Add theme */}
+      {addingTheme ? (
+        <input
+          autoFocus
+          value={themeDraft}
+          onChange={(e) => setThemeDraft(e.target.value)}
+          onBlur={commitTheme}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setThemeDraft("");
+              setAddingTheme(false);
+            }
+          }}
+          placeholder="New theme, e.g. Health"
+          maxLength={40}
+          className="rounded-2xl border border-[#a35d4d]/40 bg-[var(--c-panel-soft)] px-4 py-3 text-[14px] text-[var(--c-ink-2)] placeholder:text-[var(--c-dim)] outline-none"
+        />
+      ) : (
+        sortedThemes.length < 8 && (
+          <button
+            type="button"
+            onClick={() => setAddingTheme(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-[var(--c-line-strong)] bg-[var(--c-panel-soft)] py-4 text-sm font-medium text-[var(--c-dim)] transition-colors hover:border-[#a35d4d]/50 hover:bg-[var(--c-beige-2)] hover:text-[#a35d4d]"
+          >
+            <Plus className="size-4" />
+            Add a theme
+          </button>
+        )
+      )}
+    </section>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*                               Goals page                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -536,6 +1153,9 @@ export default function GoalsPage() {
             )}
           </section>
         )}
+
+        {/* Success behaviours — Mandala */}
+        <MandalaSection />
       </div>
     </div>
   );

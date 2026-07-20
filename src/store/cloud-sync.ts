@@ -24,6 +24,7 @@ import type {
   Task,
   TaskPriority,
   TaskStatus,
+  Theme,
 } from "./use-prod-store";
 
 type TaskRow = {
@@ -770,6 +771,59 @@ export async function pushGoals(goals: Goal[]): Promise<void> {
     }
   } catch (error) {
     console.error("[cadence] push goals threw", error);
+  }
+}
+
+/* -------------------------------- mandala -------------------------------- */
+
+/** The Mandala core label + themes, stored whole as one jsonb blob. */
+export type MandalaSync = { core: string; themes: Theme[] };
+
+/**
+ * Pulls the user's Mandala (core + themes). Returns `null` when sync is off, no
+ * user is signed in, the column is empty, or the read fails — callers keep their
+ * local copy then.
+ */
+export async function pullMandala(): Promise<MandalaSync | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return null;
+    const { data, error } = await withTimeout(
+      supabase.from("users").select("mandala").eq("id", userId).maybeSingle(),
+      "pull mandala"
+    );
+    if (error) {
+      if (!isMissingTable(error)) {
+        console.error("[cadence] pull mandala failed", error);
+      }
+      return null;
+    }
+    return (data?.mandala as MandalaSync | null) ?? null;
+  } catch (error) {
+    console.error("[cadence] pull mandala threw", error);
+    return null;
+  }
+}
+
+/** Persists the user's Mandala (core + themes). Fire-and-forget. */
+export async function pushMandala(value: MandalaSync): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return;
+    const { error } = await withAuthRetry(
+      supabase,
+      () => supabase.from("users").update({ mandala: value }).eq("id", userId),
+      "push mandala"
+    );
+    if (error && !isMissingTable(error)) {
+      console.error("[cadence] push mandala failed", error);
+    }
+  } catch (error) {
+    console.error("[cadence] push mandala threw", error);
   }
 }
 

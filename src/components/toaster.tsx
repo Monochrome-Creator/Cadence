@@ -39,6 +39,23 @@ export function Toaster() {
             <p className="min-w-0 flex-1 text-[13.5px] font-medium leading-snug">
               {toast.message}
             </p>
+            {toast.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  toast.action?.onClick();
+                  dismissToast(toast.id);
+                }}
+                className={cn(
+                  "-my-0.5 shrink-0 rounded-full px-2.5 py-1 text-[12.5px] font-semibold transition-colors",
+                  isError
+                    ? "bg-white/15 text-white hover:bg-white/25"
+                    : "bg-[var(--c-beige)] text-[var(--c-accent)] hover:bg-[var(--c-beige-2)]"
+                )}
+              >
+                {toast.action.label}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => dismissToast(toast.id)}

@@ -49,6 +49,9 @@ create table if not exists public.users (
   -- dedicated table). Synced like daily_plan; see src/store/cloud-sync.ts.
   goals jsonb,
   flashcards jsonb,
+  -- Mandala core label + themes (each holding its success behaviours), stored
+  -- whole as one jsonb blob. Synced like goals; see src/store/cloud-sync.ts.
+  mandala jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -65,6 +68,10 @@ alter table public.users
   add column if not exists goals jsonb;
 alter table public.users
   add column if not exists flashcards jsonb;
+
+-- Existing installs: add the Mandala (core + themes) state column.
+alter table public.users
+  add column if not exists mandala jsonb;
 
 -- ---------------------------------------------------------------------------
 -- 2. tasks — board rows, owned by a user and manually ordered.

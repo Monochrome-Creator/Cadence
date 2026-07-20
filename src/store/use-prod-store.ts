@@ -23,10 +23,12 @@ import {
   pullCategories,
   pullDailyPlan,
   pullGoals,
+  pullMandala,
   pullTasks,
   pushCategories,
   pushDailyPlan,
   pushGoals,
+  pushMandala,
   pushTasks,
   refreshSession,
   type SyncOutcome,
@@ -311,6 +313,54 @@ export interface Goal {
   status: "active" | "done";
   order: number;
 }
+
+/**
+ * A single "success behaviour" — a concrete action that represents what winning
+ * looks like inside a {@link Theme}. Rendered two ways from one dataset: as a
+ * chip in the simplified Goals-page view and as one of the 64 action cells in
+ * the Mandala grid. `order` (0..7) fixes its slot so both views stay
+ * deterministic.
+ */
+export interface Behaviour {
+  id: string;
+  title: string;
+  /** 0..7 slot within its theme — drives grid cell placement. */
+  order: number;
+  /** Marked "focus this week" — surfaces on the dashboard behaviour strip. */
+  activeThisWeek?: boolean;
+  /** true = recurring habit; false/undefined = one-off task. */
+  recurring?: boolean;
+  /** yyyy-MM-dd of last completion — drives "done this week" + neglect. */
+  lastCompletedDate?: string;
+}
+
+/**
+ * A Mandala theme — one of up to 8 free-text areas surrounding the core.
+ * Holds up to 8 {@link Behaviour}s. Optionally tagged to a Life Pillar so
+ * behaviour completions flow into the existing per-pillar `history` tracking.
+ */
+export interface Theme {
+  id: string;
+  title: string;
+  /** 0..7 — which outer 3×3 block / card position it occupies. */
+  order: number;
+  /** Optional bridge to the Four Pillars for color + Balance/neglect tracking. */
+  lifePillar?: LifePillar;
+  behaviours: Behaviour[];
+}
+
+/**
+ * A snapshot of a just-deleted Mandala item, kept on a transient (never
+ * persisted/synced) stack so an accidental delete can be undone — via the
+ * toast's Undo button or Cmd/Ctrl+Z. Deep-copied at delete time so restoring
+ * reinstates the exact item, id and order included.
+ */
+export type DeletedMandalaItem =
+  | { kind: "theme"; theme: Theme }
+  | { kind: "behaviour"; themeId: string; behaviour: Behaviour };
+
+/** Max depth of the Mandala undo stack. */
+const UNDO_LIMIT = 20;
 
 /** One day's logged productivity, keyed by local `yyyy-MM-dd` in `history`. */
 export interface DayActivity {
@@ -664,6 +714,15 @@ interface ProdState {
   categories: string[];
   /** North Star goals — the big objectives tasks are working toward. */
   goals: Goal[];
+  /** Mandala themes (up to 8), each holding up to 8 success behaviours. */
+  themes: Theme[];
+  /** The Mandala core label — the center-of-center focus ("" when unset). */
+  mandalaCore: string;
+  /**
+   * LIFO stack of recently-deleted Mandala items for undo. Transient — excluded
+   * from `partialize` so it never persists or syncs. Capped at {@link UNDO_LIMIT}.
+   */
+  deletedMandala: DeletedMandalaItem[];
   activeTaskId: string | null;
   /** Daily productivity log keyed by local `yyyy-MM-dd` — powers the streak. */
   history: Record<string, DayActivity>;
@@ -874,6 +933,41 @@ interface ProdState {
    * it, so no task is left with a dangling goalId.
    */
   deleteGoal: (id: string) => void;
+
+  /** Set the Mandala core (center) label. */
+  setMandalaCore: (title: string) => void;
+  /** Add a new theme (no-op past 8). */
+  addTheme: (title: string) => void;
+  /** Update a theme's title/order/pillar. */
+  updateTheme: (
+    id: string,
+    updates: Partial<Omit<Theme, "id" | "behaviours">>
+  ) => void;
+  /** Delete a theme and all its behaviours. */
+  deleteTheme: (id: string) => void;
+  /** Add a behaviour to a theme (no-op past 8 within that theme). */
+  addBehaviour: (themeId: string, title: string) => void;
+  /** Update a behaviour's fields. */
+  updateBehaviour: (
+    themeId: string,
+    behaviourId: string,
+    updates: Partial<Omit<Behaviour, "id">>
+  ) => void;
+  /** Delete a behaviour from a theme. */
+  deleteBehaviour: (themeId: string, behaviourId: string) => void;
+  /** Toggle a behaviour's "active this week" flag. */
+  toggleBehaviourActive: (themeId: string, behaviourId: string) => void;
+  /**
+   * Mark a behaviour done today: stamps lastCompletedDate and, when its theme
+   * is pillar-tagged, bumps today's per-pillar count so it flows into the
+   * Balance widget and weekly-neglect logic.
+   */
+  completeBehaviour: (themeId: string, behaviourId: string) => void;
+  /**
+   * Restore the most recently deleted Mandala theme/behaviour (LIFO). No-op
+   * when the undo stack is empty or the target would exceed the 8-item cap.
+   */
+  undoDeleteMandala: () => void;
 
   setActiveTask: (id: string | null) => void;
 
@@ -1290,12 +1384,22 @@ function pushGoalsIfCloud(getState: () => ProdState): void {
   void pushGoals(getState().goals);
 }
 
+/** Persist the Mandala core + themes to the cloud (no-op when unconfigured). */
+function pushMandalaIfCloud(getState: () => ProdState): void {
+  if (!isSupabaseConfigured) return;
+  const { mandalaCore, themes } = getState();
+  void pushMandala({ core: mandalaCore, themes });
+}
+
 export const useProdStore = create<ProdState>()(
   persist(
     (set, get) => ({
   tasks: initialTasks,
   categories: initialCategories,
   goals: [],
+  themes: [],
+  mandalaCore: "",
+  deletedMandala: [],
   activeTaskId: null,
   history: {},
   dailyPlan: null,
@@ -1928,6 +2032,208 @@ export const useProdStore = create<ProdState>()(
     pushGoalsIfCloud(get);
   },
 
+  setMandalaCore: (title) => {
+    set({ mandalaCore: title });
+    pushMandalaIfCloud(get);
+  },
+  addTheme: (title) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    let added = false;
+    set((state) => {
+      // Assign the smallest free slot 0..7 so `order` stays grid-addressable
+      // (the 9×9 Mandala has exactly 8 outer blocks) even after delete/re-add.
+      const used = new Set(state.themes.map((t) => t.order));
+      let slot = 0;
+      while (slot < 8 && used.has(slot)) slot++;
+      if (slot >= 8) return {};
+      added = true;
+      return {
+        themes: [
+          ...state.themes,
+          {
+            id: `theme-${crypto.randomUUID()}`,
+            title: trimmed,
+            order: slot,
+            behaviours: [],
+          },
+        ],
+      };
+    });
+    if (added) pushMandalaIfCloud(get);
+  },
+  updateTheme: (id, updates) => {
+    set((state) => ({
+      themes: state.themes.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+    }));
+    pushMandalaIfCloud(get);
+  },
+  deleteTheme: (id) => {
+    set((state) => {
+      const theme = state.themes.find((t) => t.id === id);
+      return {
+        themes: state.themes.filter((t) => t.id !== id),
+        deletedMandala: theme
+          ? [
+              ...state.deletedMandala,
+              { kind: "theme" as const, theme },
+            ].slice(-UNDO_LIMIT)
+          : state.deletedMandala,
+      };
+    });
+    pushMandalaIfCloud(get);
+  },
+  addBehaviour: (themeId, title) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    let added = false;
+    set((state) => ({
+      themes: state.themes.map((t) => {
+        if (t.id !== themeId || t.behaviours.length >= 8) return t;
+        // Smallest free slot 0..7 — mirrors addTheme so behaviours stay
+        // addressable by the 8 cells of a Mandala block.
+        const used = new Set(t.behaviours.map((b) => b.order));
+        let slot = 0;
+        while (slot < 8 && used.has(slot)) slot++;
+        if (slot >= 8) return t;
+        added = true;
+        return {
+          ...t,
+          behaviours: [
+            ...t.behaviours,
+            {
+              id: `beh-${crypto.randomUUID()}`,
+              title: trimmed,
+              order: slot,
+            },
+          ],
+        };
+      }),
+    }));
+    if (added) pushMandalaIfCloud(get);
+  },
+  updateBehaviour: (themeId, behaviourId, updates) => {
+    set((state) => ({
+      themes: state.themes.map((t) =>
+        t.id === themeId
+          ? {
+              ...t,
+              behaviours: t.behaviours.map((b) =>
+                b.id === behaviourId ? { ...b, ...updates } : b
+              ),
+            }
+          : t
+      ),
+    }));
+    pushMandalaIfCloud(get);
+  },
+  deleteBehaviour: (themeId, behaviourId) => {
+    set((state) => {
+      const behaviour = state.themes
+        .find((t) => t.id === themeId)
+        ?.behaviours.find((b) => b.id === behaviourId);
+      return {
+        themes: state.themes.map((t) =>
+          t.id === themeId
+            ? { ...t, behaviours: t.behaviours.filter((b) => b.id !== behaviourId) }
+            : t
+        ),
+        deletedMandala: behaviour
+          ? [
+              ...state.deletedMandala,
+              { kind: "behaviour" as const, themeId, behaviour },
+            ].slice(-UNDO_LIMIT)
+          : state.deletedMandala,
+      };
+    });
+    pushMandalaIfCloud(get);
+  },
+  toggleBehaviourActive: (themeId, behaviourId) => {
+    set((state) => ({
+      themes: state.themes.map((t) =>
+        t.id === themeId
+          ? {
+              ...t,
+              behaviours: t.behaviours.map((b) =>
+                b.id === behaviourId
+                  ? { ...b, activeThisWeek: !b.activeThisWeek }
+                  : b
+              ),
+            }
+          : t
+      ),
+    }));
+    pushMandalaIfCloud(get);
+  },
+  completeBehaviour: (themeId, behaviourId) => {
+    const today = format(new Date(), "yyyy-MM-dd");
+    set((state) => {
+      const theme = state.themes.find((t) => t.id === themeId);
+      const pillar = theme?.lifePillar;
+      return {
+        themes: state.themes.map((t) =>
+          t.id === themeId
+            ? {
+                ...t,
+                behaviours: t.behaviours.map((b) =>
+                  b.id === behaviourId
+                    ? { ...b, lastCompletedDate: today }
+                    : b
+                ),
+              }
+            : t
+        ),
+        // When the theme is pillar-tagged, count the completion toward that
+        // pillar's day total so it flows into the Balance widget + neglect logic.
+        history: pillar
+          ? {
+              ...state.history,
+              [today]: {
+                ...(state.history[today] ?? { sessions: 0, tasksDone: 0 }),
+                pillars: {
+                  ...state.history[today]?.pillars,
+                  [pillar]:
+                    (state.history[today]?.pillars?.[pillar] ?? 0) + 1,
+                },
+              },
+            }
+          : state.history,
+      };
+    });
+    pushMandalaIfCloud(get);
+  },
+  undoDeleteMandala: () => {
+    const stack = get().deletedMandala;
+    if (stack.length === 0) return;
+    const last = stack[stack.length - 1];
+    set((state) => {
+      const deletedMandala = state.deletedMandala.slice(0, -1);
+      if (last.kind === "theme") {
+        // Skip if the 8-theme cap is full or the theme somehow already exists.
+        if (
+          state.themes.length >= 8 ||
+          state.themes.some((t) => t.id === last.theme.id)
+        ) {
+          return { deletedMandala };
+        }
+        return { themes: [...state.themes, last.theme], deletedMandala };
+      }
+      // Behaviour: reinsert into its theme when the theme still exists, isn't
+      // full, and doesn't already hold it.
+      return {
+        themes: state.themes.map((t) =>
+          t.id === last.themeId &&
+          t.behaviours.length < 8 &&
+          !t.behaviours.some((b) => b.id === last.behaviour.id)
+            ? { ...t, behaviours: [...t.behaviours, last.behaviour] }
+            : t
+        ),
+        deletedMandala,
+      };
+    });
+    pushMandalaIfCloud(get);
+  },
+
   setActiveTask: (id) => set({ activeTaskId: id }),
 
   hydrate: async () => {
@@ -2005,6 +2311,16 @@ export const useProdStore = create<ProdState>()(
         set({ goals: cloudGoals });
       } else if (get().goals.length > 0) {
         await pushGoals(get().goals);
+      }
+      // Mandala (core + themes): adopt the cloud copy when present, or seed it
+      // from local on first run.
+      const cloudMandala = await pullMandala();
+      if (cloudMandala === null) {
+        // Read failed — keep local.
+      } else if (cloudMandala.themes.length > 0 || cloudMandala.core) {
+        set({ themes: cloudMandala.themes, mandalaCore: cloudMandala.core });
+      } else if (get().themes.length > 0 || get().mandalaCore) {
+        await pushMandala({ core: get().mandalaCore, themes: get().themes });
       }
 
       set({ connectionStatus: "synced" });
@@ -2098,6 +2414,14 @@ export const useProdStore = create<ProdState>()(
       } else if (get().goals.length > 0) {
         await pushGoals(get().goals);
       }
+      const cloudMandala = await pullMandala();
+      if (cloudMandala === null) {
+        // Read failed — keep local.
+      } else if (cloudMandala.themes.length > 0 || cloudMandala.core) {
+        set({ themes: cloudMandala.themes, mandalaCore: cloudMandala.core });
+      } else if (get().themes.length > 0 || get().mandalaCore) {
+        await pushMandala({ core: get().mandalaCore, themes: get().themes });
+      }
       set({ connectionStatus: "synced" });
     } catch (error) {
       console.error("[cadence] forceSync failed", error);
@@ -2168,6 +2492,9 @@ export const useProdStore = create<ProdState>()(
       tasks: [],
       categories: [],
       goals: [],
+      themes: [],
+      mandalaCore: "",
+      deletedMandala: [],
       activeTaskId: null,
       history: {},
       dailyPlan: null,
@@ -2264,6 +2591,8 @@ export const useProdStore = create<ProdState>()(
         tasks: state.tasks,
         categories: state.categories,
         goals: state.goals,
+        themes: state.themes,
+        mandalaCore: state.mandalaCore,
         activeTaskId: state.activeTaskId,
         history: state.history,
         dailyPlan: state.dailyPlan,
@@ -2284,6 +2613,9 @@ export function seedDemoData(): void {
     tasks: demoTasks,
     categories: demoCategories,
     goals: [],
+    themes: [],
+    mandalaCore: "",
+    deletedMandala: [],
     history: {},
     dailyPlan: null,
     pendingReview: null,
