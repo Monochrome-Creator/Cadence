@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   addMonths,
@@ -923,6 +923,51 @@ export default function CalendarPage() {
     [dailyPlan, tasks]
   );
 
+  // Completing a focus task strikes it through in place for a brief beat, then
+  // auto-hides it — matching the Dashboard. The grace-window Set holds a
+  // just-completed task's id so it stays visible (slashed) before dropping out.
+  const [recentlyDone, setRecentlyDone] = useState<Set<string>>(
+    () => new Set()
+  );
+  const doneTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+  const handleComplete = useCallback(
+    (id: string) => {
+      planCompleteTask(id);
+      setRecentlyDone((prev) => new Set(prev).add(id));
+      const existing = doneTimers.current.get(id);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        setRecentlyDone((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        doneTimers.current.delete(id);
+      }, 1100);
+      doneTimers.current.set(id, timer);
+    },
+    [planCompleteTask]
+  );
+  useEffect(() => {
+    const timers = doneTimers.current;
+    return () => {
+      for (const t of timers.values()) clearTimeout(t);
+    };
+  }, []);
+
+  // Progress counters read the full resolved plan; the rendered lists hide
+  // completed tasks (except those still in their grace window).
+  const visibleMain = useMemo(
+    () => main.filter((t) => t.status !== "Done" || recentlyDone.has(t.id)),
+    [main, recentlyDone]
+  );
+  const visibleManual = useMemo(
+    () => manual.filter((t) => t.status !== "Done" || recentlyDone.has(t.id)),
+    [manual, recentlyDone]
+  );
+
   const mainDone = main.filter((t) => t.status === "Done").length;
   const allMainDone = main.length > 0 && mainDone === main.length;
   const manualDone = manual.filter((t) => t.status === "Done").length;
@@ -976,12 +1021,12 @@ export default function CalendarPage() {
 
           {main.length > 0 ? (
             <div className="flex flex-col gap-2.5">
-              {main.map((task) => (
+              {visibleMain.map((task) => (
                 <PlanCard
                   key={task.id}
                   task={task}
                   today={today}
-                  onComplete={planCompleteTask}
+                  onComplete={handleComplete}
                   onRemove={planRemoveFromToday}
                 />
               ))}
@@ -1027,12 +1072,12 @@ export default function CalendarPage() {
               )}
             </div>
             <div className="flex flex-col gap-2.5">
-              {manual.map((task) => (
+              {visibleManual.map((task) => (
                 <PlanCard
                   key={task.id}
                   task={task}
                   today={today}
-                  onComplete={planCompleteTask}
+                  onComplete={handleComplete}
                   onRemove={planRemoveFromToday}
                 />
               ))}
