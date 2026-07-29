@@ -15,21 +15,22 @@ interface BeforeInstallPromptEvent extends Event {
 const DISMISSED_KEY = "cadence-install-dismissed";
 
 /**
- * Two jobs, both client-only:
- *   1. Tear down any service worker left by older app versions. A registered
- *      worker is the sole cause of the "page couldn't load on refresh" failures
- *      (a stale cached shell whose hashed /_next chunks 404 after a redeploy).
- *      The app no longer registers one; `public/sw.js` is now a self-destructing
- *      worker that evicts itself, and this effect is the same cleanup for pages
- *      that do boot.
- *   2. Auto-present a custom "Add to Home Screen" prompt.
- *        - Chromium: captures `beforeinstallprompt` and triggers the native
- *          installer on click.
- *        - iOS Safari (no `beforeinstallprompt`): shows manual Share-sheet
- *          instructions instead.
+ * Auto-presents a custom "Add to Home Screen" prompt, client-only:
+ *   - Chromium: captures `beforeinstallprompt` and triggers the native
+ *     installer on click.
+ *   - iOS Safari (no `beforeinstallprompt`): shows manual Share-sheet
+ *     instructions instead.
  *
  * Hidden when already installed (standalone display mode) or after the user
  * dismisses it (remembered in localStorage). Renders nothing until needed.
+ *
+ * Note: this component used to also force-unregister any service worker on
+ * every mount (cleanup for a pre-2026 caching worker that wedged devices on
+ * stale app shells — see public/sw.js's header comment). That's gone now:
+ * `public/sw.js` is a real, persistent push-only worker (Memento Mori's
+ * Sunday reminder), and unregistering it here on every page load would kill
+ * push delivery. It never caches or intercepts navigation, so it's safe to
+ * leave running.
  */
 export function PwaInstallPrompt() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
@@ -37,27 +38,6 @@ export function PwaInstallPrompt() {
   );
   const [isIOS, setIsIOS] = useState(false);
   const [visible, setVisible] = useState(false);
-
-  // Permanently remove any service worker from older app versions, and purge
-  // its caches. This handles pages that still boot: the stale worker is
-  // unregistered and every future request goes straight to the network. Pages
-  // too wedged to run this are evicted by the self-destructing public/sw.js,
-  // which the browser fetches and activates on its own update check.
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      void navigator.serviceWorker.getRegistrations().then((registrations) => {
-        for (const registration of registrations) {
-          void registration.unregister();
-        }
-      });
-    }
-
-    if ("caches" in window) {
-      void caches.keys().then((keys) => {
-        for (const key of keys) void caches.delete(key);
-      });
-    }
-  }, []);
 
   useEffect(() => {
     const standalone =

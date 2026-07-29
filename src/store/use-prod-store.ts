@@ -24,11 +24,13 @@ import {
   pullDailyPlan,
   pullGoals,
   pullMandala,
+  pullMemento,
   pullTasks,
   pushCategories,
   pushDailyPlan,
   pushGoals,
   pushMandala,
+  pushMemento,
   pushTasks,
   refreshSession,
   type SyncOutcome,
@@ -361,6 +363,9 @@ export type DeletedMandalaItem =
 
 /** Max depth of the Mandala undo stack. */
 const UNDO_LIMIT = 20;
+
+/** Default life expectancy (years) for the Memento Mori "life in weeks" grid. */
+const DEFAULT_LIFE_EXPECTANCY_YEARS = 83;
 
 /** One day's logged productivity, keyed by local `yyyy-MM-dd` in `history`. */
 export interface DayActivity {
@@ -723,6 +728,15 @@ interface ProdState {
    * from `partialize` so it never persists or syncs. Capped at {@link UNDO_LIMIT}.
    */
   deletedMandala: DeletedMandalaItem[];
+  /**
+   * Memento Mori — birth date (yyyy-MM-dd) powering the "life in weeks" grid
+   * on the mobile Timer page. "" when unset (shows a one-time setup prompt).
+   */
+  mementoBirthDate: string;
+  /** Assumed life expectancy in years sizing the grid (default 83). */
+  mementoLifeExpectancy: number;
+  /** 0-based week indices (from birth) explicitly checked off by the user. */
+  mementoCheckedWeeks: number[];
   activeTaskId: string | null;
   /** Daily productivity log keyed by local `yyyy-MM-dd` — powers the streak. */
   history: Record<string, DayActivity>;
@@ -968,6 +982,13 @@ interface ProdState {
    * when the undo stack is empty or the target would exceed the 8-item cap.
    */
   undoDeleteMandala: () => void;
+
+  /** Set the Memento Mori birth date (yyyy-MM-dd). */
+  setMementoBirthDate: (date: string) => void;
+  /** Set the assumed life expectancy in years. */
+  setMementoLifeExpectancy: (years: number) => void;
+  /** Toggle a week's explicit "showed up" check-in on/off. */
+  toggleMementoWeek: (weekIndex: number) => void;
 
   setActiveTask: (id: string | null) => void;
 
@@ -1391,6 +1412,18 @@ function pushMandalaIfCloud(getState: () => ProdState): void {
   void pushMandala({ core: mandalaCore, themes });
 }
 
+/** Persist Memento Mori (birth date, life expectancy, checked weeks) to the cloud. */
+function pushMementoIfCloud(getState: () => ProdState): void {
+  if (!isSupabaseConfigured) return;
+  const { mementoBirthDate, mementoLifeExpectancy, mementoCheckedWeeks } =
+    getState();
+  void pushMemento({
+    birthDate: mementoBirthDate,
+    lifeExpectancyYears: mementoLifeExpectancy,
+    checkedWeeks: mementoCheckedWeeks,
+  });
+}
+
 export const useProdStore = create<ProdState>()(
   persist(
     (set, get) => ({
@@ -1400,6 +1433,9 @@ export const useProdStore = create<ProdState>()(
   themes: [],
   mandalaCore: "",
   deletedMandala: [],
+  mementoBirthDate: "",
+  mementoLifeExpectancy: DEFAULT_LIFE_EXPECTANCY_YEARS,
+  mementoCheckedWeeks: [],
   activeTaskId: null,
   history: {},
   dailyPlan: null,
@@ -2234,6 +2270,23 @@ export const useProdStore = create<ProdState>()(
     pushMandalaIfCloud(get);
   },
 
+  setMementoBirthDate: (date) => {
+    set({ mementoBirthDate: date });
+    pushMementoIfCloud(get);
+  },
+  setMementoLifeExpectancy: (years) => {
+    set({ mementoLifeExpectancy: years });
+    pushMementoIfCloud(get);
+  },
+  toggleMementoWeek: (weekIndex) => {
+    set((state) => ({
+      mementoCheckedWeeks: state.mementoCheckedWeeks.includes(weekIndex)
+        ? state.mementoCheckedWeeks.filter((w) => w !== weekIndex)
+        : [...state.mementoCheckedWeeks, weekIndex],
+    }));
+    pushMementoIfCloud(get);
+  },
+
   setActiveTask: (id) => set({ activeTaskId: id }),
 
   hydrate: async () => {
@@ -2321,6 +2374,24 @@ export const useProdStore = create<ProdState>()(
         set({ themes: cloudMandala.themes, mandalaCore: cloudMandala.core });
       } else if (get().themes.length > 0 || get().mandalaCore) {
         await pushMandala({ core: get().mandalaCore, themes: get().themes });
+      }
+      // Memento Mori: adopt the cloud copy when present, or seed it from
+      // local on first run.
+      const cloudMemento = await pullMemento();
+      if (cloudMemento === null) {
+        // Read failed — keep local.
+      } else if (cloudMemento.birthDate) {
+        set({
+          mementoBirthDate: cloudMemento.birthDate,
+          mementoLifeExpectancy: cloudMemento.lifeExpectancyYears,
+          mementoCheckedWeeks: cloudMemento.checkedWeeks,
+        });
+      } else if (get().mementoBirthDate) {
+        await pushMemento({
+          birthDate: get().mementoBirthDate,
+          lifeExpectancyYears: get().mementoLifeExpectancy,
+          checkedWeeks: get().mementoCheckedWeeks,
+        });
       }
 
       set({ connectionStatus: "synced" });
@@ -2422,6 +2493,22 @@ export const useProdStore = create<ProdState>()(
       } else if (get().themes.length > 0 || get().mandalaCore) {
         await pushMandala({ core: get().mandalaCore, themes: get().themes });
       }
+      const cloudMemento = await pullMemento();
+      if (cloudMemento === null) {
+        // Read failed — keep local.
+      } else if (cloudMemento.birthDate) {
+        set({
+          mementoBirthDate: cloudMemento.birthDate,
+          mementoLifeExpectancy: cloudMemento.lifeExpectancyYears,
+          mementoCheckedWeeks: cloudMemento.checkedWeeks,
+        });
+      } else if (get().mementoBirthDate) {
+        await pushMemento({
+          birthDate: get().mementoBirthDate,
+          lifeExpectancyYears: get().mementoLifeExpectancy,
+          checkedWeeks: get().mementoCheckedWeeks,
+        });
+      }
       set({ connectionStatus: "synced" });
     } catch (error) {
       console.error("[cadence] forceSync failed", error);
@@ -2495,6 +2582,9 @@ export const useProdStore = create<ProdState>()(
       themes: [],
       mandalaCore: "",
       deletedMandala: [],
+      mementoBirthDate: "",
+      mementoLifeExpectancy: DEFAULT_LIFE_EXPECTANCY_YEARS,
+      mementoCheckedWeeks: [],
       activeTaskId: null,
       history: {},
       dailyPlan: null,
@@ -2593,6 +2683,9 @@ export const useProdStore = create<ProdState>()(
         goals: state.goals,
         themes: state.themes,
         mandalaCore: state.mandalaCore,
+        mementoBirthDate: state.mementoBirthDate,
+        mementoLifeExpectancy: state.mementoLifeExpectancy,
+        mementoCheckedWeeks: state.mementoCheckedWeeks,
         activeTaskId: state.activeTaskId,
         history: state.history,
         dailyPlan: state.dailyPlan,
@@ -2616,6 +2709,9 @@ export function seedDemoData(): void {
     themes: [],
     mandalaCore: "",
     deletedMandala: [],
+    mementoBirthDate: "",
+    mementoLifeExpectancy: DEFAULT_LIFE_EXPECTANCY_YEARS,
+    mementoCheckedWeeks: [],
     history: {},
     dailyPlan: null,
     pendingReview: null,

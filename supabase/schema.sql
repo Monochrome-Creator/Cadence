@@ -2,7 +2,7 @@
 -- Cadence — Supabase schema (cloud-synced Postgres, auth-scoped)
 -- ===========================================================================
 -- Run once per project in the Supabase SQL editor (Dashboard → SQL → New
--- query). Creates the three tables that mirror the Zustand state types in
+-- query). Creates the tables that mirror the Zustand state types in
 -- `src/store/use-prod-store.ts`, wires them to Supabase Auth, and enables Row
 -- Level Security so each user can only read/write their own data.
 --
@@ -52,6 +52,9 @@ create table if not exists public.users (
   -- Mandala core label + themes (each holding its success behaviours), stored
   -- whole as one jsonb blob. Synced like goals; see src/store/cloud-sync.ts.
   mandala jsonb,
+  -- Memento Mori: birth date, life expectancy, checked weeks — one jsonb blob.
+  -- Synced like mandala; see src/store/cloud-sync.ts.
+  memento_mori jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -72,6 +75,10 @@ alter table public.users
 -- Existing installs: add the Mandala (core + themes) state column.
 alter table public.users
   add column if not exists mandala jsonb;
+
+-- Existing installs: add the Memento Mori state column.
+alter table public.users
+  add column if not exists memento_mori jsonb;
 
 -- ---------------------------------------------------------------------------
 -- 2. tasks — board rows, owned by a user and manually ordered.
@@ -212,6 +219,23 @@ alter table public.subtasks
 create index if not exists subtasks_task_order_idx
   on public.subtasks (task_id, subtask_order);
 
+-- ---------------------------------------------------------------------------
+-- 4. push_subscriptions — Web Push endpoints, one row per device/browser a
+--    user has enabled notifications on (e.g. the Sunday Memento Mori
+--    reminder). A dedicated table because a user can have multiple devices.
+-- ---------------------------------------------------------------------------
+create table if not exists public.push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.users (id) on delete cascade,
+  endpoint   text not null unique,
+  p256dh     text not null,
+  auth       text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_user_idx
+  on public.push_subscriptions (user_id);
+
 -- ===========================================================================
 -- Auto-provision a public.users row when an auth user is created
 -- ===========================================================================
@@ -242,29 +266,40 @@ create trigger on_auth_user_created
 -- The browser uses the public anon key, so RLS is what actually protects data.
 -- Every policy resolves identity from auth.uid() (the caller's JWT subject).
 
-alter table public.users    enable row level security;
-alter table public.tasks    enable row level security;
-alter table public.subtasks enable row level security;
+alter table public.users             enable row level security;
+alter table public.tasks             enable row level security;
+alter table public.subtasks          enable row level security;
+alter table public.push_subscriptions enable row level security;
 
 -- users: a caller may only see and edit their own profile row.
+-- (`create policy` has no `if not exists`, so each is dropped first — this is
+-- what makes the file safe to re-run against a database that already has it.)
+drop policy if exists "users select own" on public.users;
 create policy "users select own" on public.users
   for select using (auth.uid() = id);
+drop policy if exists "users insert own" on public.users;
 create policy "users insert own" on public.users
   for insert with check (auth.uid() = id);
+drop policy if exists "users update own" on public.users;
 create policy "users update own" on public.users
   for update using (auth.uid() = id) with check (auth.uid() = id);
 
 -- tasks: scoped directly by user_id.
+drop policy if exists "tasks select own" on public.tasks;
 create policy "tasks select own" on public.tasks
   for select using (auth.uid() = user_id);
+drop policy if exists "tasks insert own" on public.tasks;
 create policy "tasks insert own" on public.tasks
   for insert with check (auth.uid() = user_id);
+drop policy if exists "tasks update own" on public.tasks;
 create policy "tasks update own" on public.tasks
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "tasks delete own" on public.tasks;
 create policy "tasks delete own" on public.tasks
   for delete using (auth.uid() = user_id);
 
 -- subtasks: ownership is inherited from the parent task.
+drop policy if exists "subtasks select own" on public.subtasks;
 create policy "subtasks select own" on public.subtasks
   for select using (
     exists (
@@ -272,6 +307,7 @@ create policy "subtasks select own" on public.subtasks
       where t.id = subtasks.task_id and t.user_id = auth.uid()
     )
   );
+drop policy if exists "subtasks insert own" on public.subtasks;
 create policy "subtasks insert own" on public.subtasks
   for insert with check (
     exists (
@@ -279,6 +315,7 @@ create policy "subtasks insert own" on public.subtasks
       where t.id = subtasks.task_id and t.user_id = auth.uid()
     )
   );
+drop policy if exists "subtasks update own" on public.subtasks;
 create policy "subtasks update own" on public.subtasks
   for update using (
     exists (
@@ -286,6 +323,7 @@ create policy "subtasks update own" on public.subtasks
       where t.id = subtasks.task_id and t.user_id = auth.uid()
     )
   );
+drop policy if exists "subtasks delete own" on public.subtasks;
 create policy "subtasks delete own" on public.subtasks
   for delete using (
     exists (
@@ -293,3 +331,15 @@ create policy "subtasks delete own" on public.subtasks
       where t.id = subtasks.task_id and t.user_id = auth.uid()
     )
   );
+
+-- push_subscriptions: scoped directly by user_id. The cron send endpoint uses
+-- the service-role key (bypasses RLS) to read across all users.
+drop policy if exists "push_subscriptions select own" on public.push_subscriptions;
+create policy "push_subscriptions select own" on public.push_subscriptions
+  for select using (auth.uid() = user_id);
+drop policy if exists "push_subscriptions insert own" on public.push_subscriptions;
+create policy "push_subscriptions insert own" on public.push_subscriptions
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "push_subscriptions delete own" on public.push_subscriptions;
+create policy "push_subscriptions delete own" on public.push_subscriptions
+  for delete using (auth.uid() = user_id);

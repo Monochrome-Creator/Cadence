@@ -1,10 +1,13 @@
 import { AccountFooter } from "@/components/sidebar";
 import { TimerWidget } from "@/components/timer-widget";
+import { MementoMoriGrid } from "@/components/memento-mori";
 
 /**
  * Dedicated focus-timer route. On desktop the Pomodoro timer also lives in the
  * sidebar, but that sidebar is hidden on phones — so this page is how mobile
- * users reach the timer via the bottom navigation bar.
+ * users reach the timer via the bottom navigation bar. Also hosts Memento
+ * Mori, the life-in-weeks grid — grouped here under "Timer" since both are
+ * about how time is spent.
  */
 export default function TimerPage() {
   return (
@@ -20,6 +23,10 @@ export default function TimerPage() {
         </header>
 
         <TimerWidget />
+
+        <div className="mt-8">
+          <MementoMoriGrid />
+        </div>
 
         {/* Sign-out lives in the sidebar on desktop; surface it here for phones. */}
         <div className="mt-4 md:hidden">

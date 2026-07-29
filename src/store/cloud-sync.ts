@@ -827,6 +827,63 @@ export async function pushMandala(value: MandalaSync): Promise<void> {
   }
 }
 
+/* ------------------------------ memento mori ------------------------------ */
+
+/** Memento Mori (birth date, life expectancy, checked weeks), one jsonb blob. */
+export type MementoSync = {
+  birthDate: string;
+  lifeExpectancyYears: number;
+  checkedWeeks: number[];
+};
+
+/**
+ * Pulls the user's Memento Mori data. Returns `null` when sync is off, no user
+ * is signed in, the column is empty, or the read fails — callers keep their
+ * local copy then.
+ */
+export async function pullMemento(): Promise<MementoSync | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return null;
+    const { data, error } = await withTimeout(
+      supabase.from("users").select("memento_mori").eq("id", userId).maybeSingle(),
+      "pull memento"
+    );
+    if (error) {
+      if (!isMissingTable(error)) {
+        console.error("[cadence] pull memento failed", error);
+      }
+      return null;
+    }
+    return (data?.memento_mori as MementoSync | null) ?? null;
+  } catch (error) {
+    console.error("[cadence] pull memento threw", error);
+    return null;
+  }
+}
+
+/** Persists the user's Memento Mori data. Fire-and-forget. */
+export async function pushMemento(value: MementoSync): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+  try {
+    const userId = await getUserId(supabase);
+    if (!userId) return;
+    const { error } = await withAuthRetry(
+      supabase,
+      () => supabase.from("users").update({ memento_mori: value }).eq("id", userId),
+      "push memento"
+    );
+    if (error && !isMissingTable(error)) {
+      console.error("[cadence] push memento failed", error);
+    }
+  } catch (error) {
+    console.error("[cadence] push memento threw", error);
+  }
+}
+
 /**
  * Deletes a task (subtasks cascade via the FK) from the cloud. Returns `true`
  * on success, `false` when sync is off or the delete failed/timed out.
