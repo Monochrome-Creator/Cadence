@@ -2709,9 +2709,12 @@ export function seedDemoData(): void {
     themes: [],
     mandalaCore: "",
     deletedMandala: [],
-    mementoBirthDate: "",
+    // Give the fictional maker a birth date so the demo shows the actual
+    // life-in-weeks grid rather than the empty birth-date form, with a few
+    // recent weeks checked off to exercise all three cell states.
+    mementoBirthDate: "1990-06-15",
     mementoLifeExpectancy: DEFAULT_LIFE_EXPECTANCY_YEARS,
-    mementoCheckedWeeks: [],
+    mementoCheckedWeeks: [1878, 1879, 1880, 1886, 1887, 1888, 1889],
     history: {},
     dailyPlan: null,
     pendingReview: null,

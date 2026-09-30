@@ -5,6 +5,10 @@ import type { NextConfig } from "next";
 const isGhPages = process.env.GITHUB_PAGES === "true";
 
 const nextConfig: NextConfig = {
+  // Pin the workspace root to this project. Next infers the root from the
+  // nearest lockfile walking upwards, which finds a stray ~/package-lock.json
+  // and scopes the dev file watcher to the entire home directory.
+  turbopack: { root: __dirname },
   ...(isGhPages && {
     output: "export",
     basePath: "/Cadence",

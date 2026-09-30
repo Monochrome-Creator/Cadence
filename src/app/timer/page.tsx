@@ -23,15 +23,17 @@ export default function TimerPage() {
         </header>
 
         <TimerWidget />
+      </div>
 
-        <div className="mt-8">
-          <MementoMoriGrid />
-        </div>
+      {/* Wider than the timer column above — the life-in-weeks grid is
+          landscape-shaped and wants the extra desktop width to fit in view. */}
+      <div className="mx-auto mt-8 max-w-md md:max-w-4xl lg:max-w-6xl">
+        <MementoMoriGrid />
+      </div>
 
-        {/* Sign-out lives in the sidebar on desktop; surface it here for phones. */}
-        <div className="mt-4 md:hidden">
-          <AccountFooter />
-        </div>
+      {/* Sign-out lives in the sidebar on desktop; surface it here for phones. */}
+      <div className="mx-auto mt-4 max-w-md md:hidden">
+        <AccountFooter />
       </div>
     </div>
   );
