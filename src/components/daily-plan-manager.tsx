@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { usePathname } from "next/navigation";
 import { format, isValid, parseISO } from "date-fns";
 import { CalendarClock, Check, X } from "lucide-react";
 
@@ -21,13 +22,16 @@ import { cn } from "@/lib/utils";
  * Renders only the review modal (or nothing).
  */
 export function DailyPlanManager() {
+  const pathname = usePathname();
+  const isConnectionRoute = pathname === "/login" || pathname === "/reset" ||
+    pathname.startsWith("/auth") || pathname.startsWith("/settings/");
   const isHydrated = useProdStore((state) => state.isHydrated);
   const refreshRecurringTasks = useProdStore((state) => state.refreshRecurringTasks);
   const ensureDailyPlan = useProdStore((state) => state.ensureDailyPlan);
 
   // Day-rollover pass: reopen elapsed recurring tasks, then (re)build the plan.
   useEffect(() => {
-    if (!isHydrated) return;
+    if (!isHydrated || isConnectionRoute) return;
 
     const run = () => {
       refreshRecurringTasks();
@@ -40,9 +44,10 @@ export function DailyPlanManager() {
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [isHydrated, refreshRecurringTasks, ensureDailyPlan]);
+  }, [isHydrated, isConnectionRoute, refreshRecurringTasks, ensureDailyPlan]);
 
-  return <DailyReviewModal />;
+  // Connection screens must remain usable even with an unfinished cached plan.
+  return isConnectionRoute ? null : <DailyReviewModal />;
 }
 
 /** Render the missed-plan deadline as "Friday, 13 Jun" (or "yesterday"). */

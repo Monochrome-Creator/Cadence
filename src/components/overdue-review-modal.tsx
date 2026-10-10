@@ -127,7 +127,8 @@ export function OverdueReviewModal() {
   const isAuthRoute =
     pathname === "/login" ||
     pathname === "/reset" ||
-    pathname.startsWith("/auth");
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/settings/");
 
   const today = todayKey();
   const overdue = useMemo(
