@@ -73,10 +73,15 @@ function check(cond, label, extra) {
   return label;
 }
 
+const SKIP = Symbol("skip");
+
 async function test(name, fn) {
   const checks = [];
   try {
-    await fn((cond, label, extra) => checks.push(check(cond, label, extra)));
+    if ((await fn((cond, label, extra) => checks.push(check(cond, label, extra)))) === SKIP) {
+      console.log(`SKIP  ${name} (needs ALLOW_PROFILE_WRITES=1 on a test account)`);
+      return;
+    }
     results.push({ name, ok: true });
     console.log(`PASS  ${name}`);
     for (const c of checks) console.log(`        ✓ ${c}`);
@@ -299,7 +304,7 @@ await test("9. Subtasks: add / nest / edit / delete, version-guarded", async (ok
 });
 
 await test("10. is_today + Daily Plan focus list", async (ok) => {
-  if (!PROFILE_WRITES) return console.log("        (skipped: set ALLOW_PROFILE_WRITES=1 on a test account)");
+  if (!PROFILE_WRITES) return SKIP;
   const tasks = [];
   for (let i = 0; i < 6; i++) tasks.push(await createTask({ title: `today ${i}` }));
   for (let i = 0; i < 5; i++) {
@@ -320,7 +325,7 @@ await test("10. is_today + Daily Plan focus list", async (ok) => {
 });
 
 await test("11. Goals: create / edit, version-guarded", async (ok) => {
-  if (!PROFILE_WRITES) return console.log("        (skipped: set ALLOW_PROFILE_WRITES=1 on a test account)");
+  if (!PROFILE_WRITES) return SKIP;
   const list = await api("GET", "/api/goals");
   ok(list.status === 200 && Array.isArray(list.json.goals), "GET goals → 200", list.status);
   const c = await api("POST", "/api/goals", { body: { title: "[API TEST] goal", target_date: "2027-01-01", life_pillar: "Wealth", expected_updated_at: list.json.updated_at } });
@@ -335,7 +340,7 @@ await test("11. Goals: create / edit, version-guarded", async (ok) => {
 });
 
 await test("12. Categories: replace list, version-guarded", async (ok) => {
-  if (!PROFILE_WRITES) return console.log("        (skipped: set ALLOW_PROFILE_WRITES=1 on a test account)");
+  if (!PROFILE_WRITES) return SKIP;
   const cur = await api("GET", "/api/categories");
   ok(cur.status === 200, "GET categories → 200", cur.status);
   const next = [...cur.json.categories.filter((c) => c !== "API Test"), "API Test"];
@@ -371,7 +376,7 @@ for (const id of created) {
   if (d.status === 200) cleaned++;
 }
 const passed = results.filter((r) => r.ok).length;
-console.log(`\n${passed}/${results.length} tests passed`);
+console.log(`\n${passed}/${results.length} tests passed${results.length < 12 ? ` (${12 - results.length} skipped)` : ""}`);
 console.log(`Cleanup: deleted ${cleaned} test task(s) via the API`);
 console.log(`CREATED_IDS: ${created.join(",")}`);
 process.exit(passed === results.length ? 0 : 1);
