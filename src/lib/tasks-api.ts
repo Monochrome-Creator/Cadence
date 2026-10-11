@@ -1,5 +1,6 @@
 /**
- * Shared plumbing for the external Tasks REST API (/api/tasks/*), spec:
+ * Shared plumbing for the external Cadence REST API (/api/tasks/*, /api/goals,
+ * /api/daily-plan, /api/categories), spec:
  * CADENCE_API_SPEC.md. Server-only. Additive — the app's own sync layer
  * (src/store/cloud-sync.ts) never touches this module.
  *
@@ -31,12 +32,16 @@ export const TASK_STATUSES = [
 ] as const;
 export const TASK_PRIORITIES = ["Critical", "High", "Medium", "Low"] as const;
 export const LIFE_PILLARS = ["Wealth", "Health", "Career", "Personal_IP"] as const;
+export const SUBTASK_STATUSES = ["todo", "done", "cancelled"] as const;
+export const SUBTASK_LEVELS = ["L1", "L2", "L3"] as const;
+/** Mirrors MAX_TODAY_TASKS in src/store/use-prod-store.ts. */
+export const MAX_TODAY_TASKS = 5;
 
-/** Columns selected for every task response (subtasks are read-only). */
+/** Columns selected for every task response. */
 export const TASK_SELECT =
-  "id, title, status, priority, deadline, category, recurrence, progress, goal_id, life_pillar, last_completed_period, pomodoros_logged, updated_at, completed_at, subtasks(id, title, status, level, percent, deadline, subtask_order)";
+  "id, title, status, priority, deadline, category, recurrence, progress, goal_id, life_pillar, is_today, last_completed_period, pomodoros_logged, updated_at, completed_at, subtasks(id, title, status, level, percent, deadline, subtask_order)";
 
-type SubtaskRow = {
+export type SubtaskRow = {
   id: string;
   title: string;
   status: string;
@@ -57,6 +62,7 @@ export type TaskRow = {
   progress: number | null;
   goal_id: string | null;
   life_pillar: string | null;
+  is_today: boolean;
   last_completed_period: string | null;
   pomodoros_logged: number;
   updated_at: string;
@@ -66,11 +72,23 @@ export type TaskRow = {
 
 /** DB row → API task. The app stores "no deadline" as ""; the API says null. */
 export function toApiTask(row: TaskRow) {
-  const { subtasks, deadline, ...rest } = row;
   return {
-    ...rest,
-    deadline: deadline || null,
-    subtasks: [...(subtasks ?? [])]
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    priority: row.priority,
+    deadline: row.deadline || null,
+    category: row.category,
+    recurrence: row.recurrence,
+    progress: row.progress,
+    goal_id: row.goal_id,
+    life_pillar: row.life_pillar,
+    is_today: row.is_today,
+    last_completed_period: row.last_completed_period,
+    pomodoros_logged: row.pomodoros_logged,
+    updated_at: row.updated_at,
+    completed_at: row.completed_at,
+    subtasks: [...(row.subtasks ?? [])]
       .sort((a, b) => a.subtask_order - b.subtask_order)
       .map(({ id, title, status, level, percent, deadline }) => ({
         id, title, status, level, percent, deadline,
@@ -100,8 +118,8 @@ export class ApiError extends Error {
   }
 }
 
-export const notFound = () =>
-  new ApiError(404, "not_found", "Task not found");
+export const notFound = (what = "Task") =>
+  new ApiError(404, "not_found", `${what} not found`);
 
 export const validation = (message: string, details: Record<string, unknown> = {}) =>
   new ApiError(400, "validation_error", message, details);
@@ -269,6 +287,29 @@ const FIELD_VALIDATORS: Record<string, (v: unknown) => unknown> = {
     if (!LIFE_PILLARS.includes(v as never)) throw `one of: ${LIFE_PILLARS.join(", ")}, or null`;
     return v;
   },
+  is_today: (v) => {
+    if (typeof v !== "boolean") throw "true or false";
+    return v;
+  },
+};
+
+/** Validators for subtask fields (subtask endpoints). */
+const SUBTASK_VALIDATORS: Record<string, (v: unknown) => unknown> = {
+  title: FIELD_VALIDATORS.title,
+  status: (v) => {
+    if (!SUBTASK_STATUSES.includes(v as never)) throw `one of: ${SUBTASK_STATUSES.join(", ")}`;
+    return v;
+  },
+  level: (v) => {
+    if (!SUBTASK_LEVELS.includes(v as never)) throw `one of: ${SUBTASK_LEVELS.join(", ")}`;
+    return v;
+  },
+  percent: FIELD_VALIDATORS.progress,
+  deadline: (v) => {
+    if (v === null) return null;
+    if (!isIsoDate(v)) throw "YYYY-MM-DD or null";
+    return v;
+  },
 };
 
 /**
@@ -279,7 +320,8 @@ const FIELD_VALIDATORS: Record<string, (v: unknown) => unknown> = {
 export function pickFields(
   body: Record<string, unknown>,
   allowed: readonly string[],
-  ignore: readonly string[] = []
+  ignore: readonly string[] = [],
+  validators: Record<string, (v: unknown) => unknown> = FIELD_VALIDATORS
 ): Record<string, unknown> {
   const unknown = Object.keys(body).filter((k) => !allowed.includes(k) && !ignore.includes(k));
   if (unknown.length > 0) {
@@ -290,7 +332,7 @@ export function pickFields(
   for (const key of allowed) {
     if (!(key in body)) continue;
     try {
-      out[key] = FIELD_VALIDATORS[key](body[key]);
+      out[key] = validators[key](body[key]);
     } catch (expected) {
       errors[key] = `must be ${expected}`;
     }
@@ -312,6 +354,11 @@ export async function fetchTask(ctx: ApiContext, id: string): Promise<TaskRow | 
   return data as TaskRow | null;
 }
 
+export const pickSubtaskFields = (
+  body: Record<string, unknown>,
+  allowed: readonly string[]
+) => pickFields(body, allowed, ["expected_updated_at"], SUBTASK_VALIDATORS);
+
 export function requireExpectedUpdatedAt(body: Record<string, unknown>): string {
   const expected = body.expected_updated_at;
   if (!isTimestamp(expected)) {
@@ -322,13 +369,11 @@ export function requireExpectedUpdatedAt(body: Record<string, unknown>): string 
   return expected;
 }
 
-const conflict = (server: TaskRow, attempted: Record<string, unknown>) =>
-  new ApiError(
-    409,
-    "conflict",
-    "Task changed since expected_updated_at; nothing was written",
-    { server: toApiTask(server), attempted }
-  );
+export const conflict = (server: unknown, attempted: Record<string, unknown>) =>
+  new ApiError(409, "conflict", "Changed since expected_updated_at; nothing was written", {
+    server,
+    attempted,
+  });
 
 /**
  * Compare-and-set update: writes `changes` only if the row's updated_at still
@@ -346,7 +391,7 @@ export async function casUpdate(
   // Fast path: a millisecond-level mismatch is a definite conflict. (Equal ms
   // isn't proof of a match — Postgres keeps µs — so the WHERE below decides.)
   if (Date.parse(current.updated_at) !== Date.parse(expected)) {
-    throw conflict(current, attempted);
+    throw conflict(toApiTask(current), attempted);
   }
   const { data, error } = await ctx.db
     .from("tasks")
@@ -359,7 +404,62 @@ export async function casUpdate(
   if (data && data.length === 1) return data[0] as TaskRow;
   const latest = await fetchTask(ctx, current.id);
   if (!latest) throw notFound();
-  throw conflict(latest, attempted);
+  throw conflict(toApiTask(latest), attempted);
+}
+
+/**
+ * Mirrors the app's sendTaskToToday cap: at most MAX_TODAY_TASKS active
+ * (not Done, not Inbox) tasks may be flagged is_today at once.
+ */
+export async function assertTodayCapacity(ctx: ApiContext, taskId: string) {
+  const { count, error } = await ctx.db
+    .from("tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", ctx.userId)
+    .eq("is_today", true)
+    .not("status", "in", "(Done,Inbox)")
+    .neq("id", taskId);
+  if (error) throw new ApiError(500, "internal", "Database read failed");
+  if ((count ?? 0) >= MAX_TODAY_TASKS) {
+    throw validation(`Today already has ${MAX_TODAY_TASKS} active tasks (the app's cap)`, {
+      max_today_tasks: MAX_TODAY_TASKS,
+    });
+  }
+}
+
+/**
+ * Atomically replaces a task's subtask list via api_replace_subtasks()
+ * (row lock + expected_updated_at check + write in one transaction), then
+ * returns the fresh task. 409 with both versions on a stale version.
+ */
+export async function replaceSubtasks(
+  ctx: ApiContext,
+  taskId: string,
+  expected: string,
+  subtasks: Omit<SubtaskRow, "subtask_order">[],
+  attempted: Record<string, unknown>
+): Promise<TaskRow> {
+  const { data, error } = await ctx.db.rpc("api_replace_subtasks", {
+    p_user: ctx.userId,
+    p_task_id: taskId,
+    p_expected: expected,
+    p_subtasks: subtasks,
+  });
+  if (error) throw new ApiError(500, "internal", "Database write failed");
+  const result = (data as { result: string }).result;
+  const latest = await fetchTask(ctx, taskId);
+  if (result === "not_found" || !latest) throw notFound();
+  if (result === "conflict") throw conflict(toApiTask(latest), attempted);
+  return latest;
+}
+
+/** Reads expected_updated_at from a JSON body or, for DELETE, the query string. */
+export async function readExpected(request: Request): Promise<string> {
+  const fromQuery = new URL(request.url).searchParams.get("expected_updated_at");
+  if (fromQuery !== null) return requireExpectedUpdatedAt({ expected_updated_at: fromQuery });
+  const body = await readJsonObject(request);
+  pickFields(body, [], ["expected_updated_at"]);
+  return requireExpectedUpdatedAt(body);
 }
 
 /**
@@ -374,4 +474,54 @@ export function assertNotRecurringCompletion(task: TaskRow) {
       { recurrence: task.recurrence }
     );
   }
+}
+
+/* ------------------------- user-row jsonb blobs -------------------------- */
+
+/** Blobs on public.users exposed by the API, each with its version column. */
+export type UserBlob = "goals" | "daily_plan" | "categories";
+
+export async function readUserBlob<T>(
+  ctx: ApiContext,
+  blob: UserBlob
+): Promise<{ value: T | null; updated_at: string }> {
+  const { data, error } = await ctx.db
+    .from("users")
+    .select(`${blob}, ${blob}_updated_at`)
+    .eq("id", ctx.userId)
+    .single();
+  if (error || !data) throw new ApiError(500, "internal", "Database read failed");
+  const row = data as unknown as Record<string, unknown>;
+  return { value: (row[blob] as T | null) ?? null, updated_at: row[`${blob}_updated_at`] as string };
+}
+
+/**
+ * Compare-and-set write of a whole blob: only lands if `<blob>_updated_at`
+ * still equals `expected` (bumped by the users_touch_blobs trigger on any
+ * change, app edits included). On mismatch: 409 with the stored version.
+ */
+export async function casUpdateUserBlob<T>(
+  ctx: ApiContext,
+  blob: UserBlob,
+  expected: string,
+  value: T,
+  attempted: Record<string, unknown>,
+  present: (value: T | null, updatedAt: string) => unknown
+): Promise<string> {
+  const current = await readUserBlob<T>(ctx, blob);
+  if (Date.parse(current.updated_at) !== Date.parse(expected)) {
+    throw conflict(present(current.value, current.updated_at), attempted);
+  }
+  const { data, error } = await ctx.db
+    .from("users")
+    .update({ [blob]: value })
+    .eq("id", ctx.userId)
+    .eq(`${blob}_updated_at`, expected)
+    .select(`${blob}_updated_at`);
+  if (error) throw new ApiError(500, "internal", "Database write failed");
+  if (data && data.length === 1) {
+    return (data[0] as unknown as Record<string, string>)[`${blob}_updated_at`];
+  }
+  const latest = await readUserBlob<T>(ctx, blob);
+  throw conflict(present(latest.value, latest.updated_at), attempted);
 }

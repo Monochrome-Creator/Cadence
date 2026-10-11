@@ -511,12 +511,16 @@ export async function ensureUserRow(
 }
 
 /**
- * Upserts the given tasks and their subtasks to the cloud. Subtasks that no
- * longer exist locally are removed so deletions propagate. Never throws into
- * the UI: returns `true` when the round-trip fully succeeded, `false` when sync
- * is unavailable or any write failed/timed out (so callers can show "offline").
+ * Upserts the given tasks and their subtasks to the cloud, and deletes the
+ * subtask ids in `removedSubtaskIds` (the user's local deletions) so they
+ * propagate. Never throws into the UI: returns `true` when the round-trip fully
+ * succeeded, `false` when sync is unavailable or any write failed/timed out (so
+ * callers can show "offline").
  */
-export async function pushTasks(tasks: Task[]): Promise<SyncOutcome> {
+export async function pushTasks(
+  tasks: Task[],
+  removedSubtaskIds: string[] = []
+): Promise<SyncOutcome> {
   const supabase = getSupabaseClient();
   if (!supabase || tasks.length === 0) return { ok: false, reason: "unavailable" };
 
@@ -571,29 +575,17 @@ export async function pushTasks(tasks: Task[]): Promise<SyncOutcome> {
       }
     }
 
-    // Drop subtasks that were removed locally for the affected tasks.
-    const keepIds = new Set(subtaskRows.map((row) => row.id));
-    for (const task of tasks) {
-      const liveIds = task.subtasks
-        .map((s) => s.id)
-        .filter((id) => keepIds.has(id));
-      // Build a fresh query each attempt (query builders are single-use) so the
-      // auth-retry can re-run it after refreshing an expired token.
+    // Delete exactly the subtasks the user removed on this device. Never prune
+    // "whatever this device doesn't know about": a device holding a stale copy
+    // would wipe subtasks added elsewhere (another device, or the API).
+    if (removedSubtaskIds.length > 0) {
       const { error: delErr } = await withAuthRetry(
         supabase,
-        () => {
-          const query = supabase
-            .from("subtasks")
-            .delete()
-            .eq("task_id", task.id);
-          return liveIds.length
-            ? query.not("id", "in", `(${liveIds.join(",")})`)
-            : query;
-        },
-        "prune subtasks"
+        () => supabase.from("subtasks").delete().in("id", removedSubtaskIds),
+        "delete removed subtasks"
       );
       if (delErr) {
-        if (!isMissingTable(delErr)) logSupabaseError("prune subtasks", delErr);
+        if (!isMissingTable(delErr)) logSupabaseError("delete removed subtasks", delErr);
         failure ??= {
           ok: false,
           reason: classifyError(delErr),

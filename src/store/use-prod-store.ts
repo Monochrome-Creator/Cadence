@@ -773,6 +773,13 @@ interface ProdState {
   /** Durable outbox for deletions not yet confirmed removed from the cloud. */
   unsyncedDeletedIds: string[];
   /**
+   * Durable outbox of subtask ids the user deleted that the cloud hasn't
+   * confirmed removed. A push deletes exactly these — never "every subtask
+   * this device doesn't know about", which would wipe subtasks added
+   * elsewhere (e.g. via the API) by a device holding a stale copy.
+   */
+  unsyncedDeletedSubtaskIds: string[];
+  /**
    * When set, a reconnect found unsynced local changes and paused instead of
    * overwriting them — the sync-review modal renders from this. Null otherwise.
    */
@@ -1355,6 +1362,31 @@ function buildPendingSync(
   };
 }
 
+/**
+ * Ids deleteSubtask removes: the target plus the contiguous deeper rows that
+ * follow it (its children in the outline-derived hierarchy).
+ */
+function removedSubtaskIds(tasks: Task[], taskId: string, subtaskId: string): string[] {
+  const subtasks = tasks.find((t) => t.id === taskId)?.subtasks ?? [];
+  const index = subtasks.findIndex((s) => s.id === subtaskId);
+  if (index === -1) return [];
+  const targetLevel = SUBTASK_LEVEL_NUM[subtasks[index].level];
+  let end = index + 1;
+  while (end < subtasks.length && SUBTASK_LEVEL_NUM[subtasks[end].level] > targetLevel) {
+    end += 1;
+  }
+  return subtasks.slice(index, end).map((s) => s.id);
+}
+
+/** Drops confirmed-deleted subtask ids from the durable outbox. */
+function clearDeletedSubtasks(ids: string[]): void {
+  useProdStore.setState((state) => ({
+    unsyncedDeletedSubtaskIds: state.unsyncedDeletedSubtaskIds.filter(
+      (id) => !ids.includes(id)
+    ),
+  }));
+}
+
 function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
   if (!isSupabaseConfigured) return;
   // Track the edit in the durable outbox first so it survives a reload/idle
@@ -1368,12 +1400,16 @@ function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
     pendingTaskIds.clear();
     const tasks = getState().tasks.filter((task) => ids.has(task.id));
     if (tasks.length === 0) return;
+    const removed = [...getState().unsyncedDeletedSubtaskIds];
     useProdStore.setState({ connectionStatus: "connecting" });
-    void pushTasks(tasks).then((outcome) => {
+    void pushTasks(tasks, removed).then((outcome) => {
       applyPushOutcome(outcome);
       // Only clear the outbox on a confirmed success — a failed push keeps the
       // ids marked so the next reconnect can recover them.
-      if (outcome.ok) clearUnsynced([...ids]);
+      if (outcome.ok) {
+        clearUnsynced([...ids]);
+        clearDeletedSubtasks(removed);
+      }
     });
   }, 400);
 }
@@ -1450,6 +1486,7 @@ export const useProdStore = create<ProdState>()(
   lastSyncError: null,
   unsyncedTaskIds: [],
   unsyncedDeletedIds: [],
+  unsyncedDeletedSubtaskIds: [],
   pendingSync: null,
 
   mode: "focus",
@@ -1937,6 +1974,12 @@ export const useProdStore = create<ProdState>()(
   },
   deleteSubtask: (taskId, subtaskId) => {
     set((state) => ({
+      unsyncedDeletedSubtaskIds: isSupabaseConfigured
+        ? [
+            ...state.unsyncedDeletedSubtaskIds,
+            ...removedSubtaskIds(state.tasks, taskId, subtaskId),
+          ]
+        : state.unsyncedDeletedSubtaskIds,
       tasks: state.tasks.map((task) => {
         if (task.id !== taskId) return task;
         const index = task.subtasks.findIndex((s) => s.id === subtaskId);
@@ -2427,13 +2470,15 @@ export const useProdStore = create<ProdState>()(
         pendingTaskIds.clear();
         const pending = get().tasks.filter((t) => ids.has(t.id));
         if (pending.length > 0) {
-          const outcome = await pushTasks(pending);
+          const removed = [...get().unsyncedDeletedSubtaskIds];
+          const outcome = await pushTasks(pending, removed);
           if (!outcome.ok) {
             applyPushOutcome(outcome);
             return;
           }
           // Confirmed — drop these from the outbox so they don't trip the guard.
           clearUnsynced([...ids]);
+          clearDeletedSubtasks(removed);
         }
       }
 
@@ -2530,7 +2575,7 @@ export const useProdStore = create<ProdState>()(
         pending.unsyncedIds.includes(t.id)
       );
       if (toPush.length > 0) {
-        const outcome = await pushTasks(toPush);
+        const outcome = await pushTasks(toPush, get().unsyncedDeletedSubtaskIds);
         if (!outcome.ok) {
           applyPushOutcome(outcome);
           // Keep the prompt (and the outbox) so the user can retry once the
@@ -2544,7 +2589,7 @@ export const useProdStore = create<ProdState>()(
         await deleteTaskRemote(id);
       }
       // Outbox is flushed — clear it before adopting the merged cloud copy.
-      set({ unsyncedTaskIds: [], unsyncedDeletedIds: [] });
+      set({ unsyncedTaskIds: [], unsyncedDeletedIds: [], unsyncedDeletedSubtaskIds: [] });
       const merged = await pullTasks();
       if (merged !== null) set({ tasks: merged });
       set({ connectionStatus: "synced", lastSyncError: null });
@@ -2565,6 +2610,7 @@ export const useProdStore = create<ProdState>()(
       tasks: pending.cloudTasks,
       unsyncedTaskIds: [],
       unsyncedDeletedIds: [],
+      unsyncedDeletedSubtaskIds: [],
       pendingSync: null,
       connectionStatus: "synced",
       lastSyncError: null,
@@ -2591,6 +2637,7 @@ export const useProdStore = create<ProdState>()(
       pendingReview: null,
       unsyncedTaskIds: [],
       unsyncedDeletedIds: [],
+      unsyncedDeletedSubtaskIds: [],
       pendingSync: null,
     });
   },
@@ -2694,6 +2741,7 @@ export const useProdStore = create<ProdState>()(
         // can be recovered on the next reconnect. pendingSync is runtime-only.
         unsyncedTaskIds: state.unsyncedTaskIds,
         unsyncedDeletedIds: state.unsyncedDeletedIds,
+        unsyncedDeletedSubtaskIds: state.unsyncedDeletedSubtaskIds,
       }),
     }
   )
