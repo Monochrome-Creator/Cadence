@@ -1152,10 +1152,7 @@ export default function HomePage() {
   const escalatePriority = useProdStore((state) => state.escalatePriority);
   const sessionsCompleted = useProdStore((state) => state.sessionsCompleted);
   const history = useProdStore((state) => state.history);
-  const updateTask = useProdStore((state) => state.updateTask);
-  const completeAndRepeatTask = useProdStore(
-    (state) => state.completeAndRepeatTask
-  );
+  const completeTask = useProdStore((state) => state.completeTask);
 
   // Completing a task in Today's focus flips it to Done immediately, but we keep
   // it on-screen (slashed) for a brief beat so the completion reads as a
@@ -1168,11 +1165,7 @@ export default function HomePage() {
   );
   const handleComplete = useCallback(
     (task: Task) => {
-      if (task.recurrence !== "none") {
-        completeAndRepeatTask(task.id);
-      } else {
-        updateTask(task.id, { status: "Done" });
-      }
+      completeTask(task.id);
       setRecentlyDone((prev) => new Set(prev).add(task.id));
       const existing = doneTimers.current.get(task.id);
       if (existing) clearTimeout(existing);
@@ -1186,7 +1179,7 @@ export default function HomePage() {
       }, 1100);
       doneTimers.current.set(task.id, timer);
     },
-    [completeAndRepeatTask, updateTask]
+    [completeTask]
   );
   useEffect(() => {
     const timers = doneTimers.current;

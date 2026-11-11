@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { CloudUpload, Pencil, Plus, Trash2, UploadCloud } from "lucide-react";
 
 import { useProdStore, type Task } from "@/store/use-prod-store";
+import { usePrompt } from "@/lib/use-prompt";
 
 /* -------------------------------------------------------------------------- */
 /*                           Sync review modal                                */
@@ -59,12 +60,13 @@ export function SyncReviewModal() {
     return [...edits, ...deletes];
   }, [pendingSync]);
 
-  if (!pendingSync) return null;
+  const showing = usePrompt("syncReview", pendingSync !== null);
+  if (!pendingSync || !showing) return null;
 
   const count = changes.length;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-[rgba(40,33,28,0.35)] p-4 backdrop-blur-sm sm:items-center">
+    <div data-prompt="syncReview" className="fixed inset-0 z-[70] flex items-end justify-center bg-[rgba(40,33,28,0.35)] p-4 backdrop-blur-sm sm:items-center">
       <div
         role="dialog"
         aria-modal="true"

@@ -16,6 +16,7 @@
  *   status, duration. Never titles or bodies.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
+import { MAX_TODAY_TASKS, NOT_ACTIVE_TODAY } from "@/lib/task-lifecycle";
 
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -34,8 +35,7 @@ export const TASK_PRIORITIES = ["Critical", "High", "Medium", "Low"] as const;
 export const LIFE_PILLARS = ["Wealth", "Health", "Career", "Personal_IP"] as const;
 export const SUBTASK_STATUSES = ["todo", "done", "cancelled"] as const;
 export const SUBTASK_LEVELS = ["L1", "L2", "L3"] as const;
-/** Mirrors MAX_TODAY_TASKS in src/store/use-prod-store.ts. */
-export const MAX_TODAY_TASKS = 5;
+export { MAX_TODAY_TASKS };
 
 /** Columns selected for every task response. */
 export const TASK_SELECT =
@@ -417,7 +417,7 @@ export async function assertTodayCapacity(ctx: ApiContext, taskId: string) {
     .select("id", { count: "exact", head: true })
     .eq("user_id", ctx.userId)
     .eq("is_today", true)
-    .not("status", "in", "(Done,Inbox)")
+    .not("status", "in", `(${NOT_ACTIVE_TODAY.join(",")})`)
     .neq("id", taskId);
   if (error) throw new ApiError(500, "internal", "Database read failed");
   if ((count ?? 0) >= MAX_TODAY_TASKS) {

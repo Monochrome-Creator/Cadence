@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
 
+import { secondsLeft } from "@/lib/machines/timer";
 import {
   TIMER_DURATIONS,
   TIMER_MODE_LABELS,
@@ -42,49 +43,13 @@ const MODE_THEME: Record<
   },
 };
 
-/** Play a short two-tone "ping" via the Web Audio API (no asset needed). */
-function useChime() {
-  const ctxRef = useRef<AudioContext | null>(null);
-
-  return () => {
-    try {
-      if (typeof window === "undefined") return;
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext?: typeof AudioContext })
-          .webkitAudioContext;
-      if (!AudioCtx) return;
-
-      if (!ctxRef.current) ctxRef.current = new AudioCtx();
-      const ctx = ctxRef.current;
-      // Resume in case the context was suspended by autoplay policy.
-      void ctx.resume();
-
-      const now = ctx.currentTime;
-      const notes = [880, 1244.51]; // A5 then D#6 — a gentle rising ping.
-      notes.forEach((freq, i) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = freq;
-        const start = now + i * 0.18;
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
-        osc.connect(gain).connect(ctx.destination);
-        osc.start(start);
-        osc.stop(start + 0.4);
-      });
-    } catch {
-      // Audio is non-essential — never let it break the timer.
-    }
-  };
-}
-
 export function TimerWidget() {
-  const mode = useProdStore((state) => state.mode);
-  const timeLeft = useProdStore((state) => state.timeLeft);
-  const isRunning = useProdStore((state) => state.isRunning);
+  const mode = useProdStore((state) => state.timer.mode);
+  const status = useProdStore((state) => state.timer.status);
+  const timeLeft = useProdStore((state) =>
+    secondsLeft(state.timer, state.timerNow)
+  );
+  const isRunning = status === "running";
   const sessionsCompleted = useProdStore((state) => state.sessionsCompleted);
   const completions = useProdStore((state) => state.completions);
   const activeTask = useProdStore((state) =>
@@ -97,27 +62,16 @@ export function TimerWidget() {
   const switchMode = useProdStore((state) => state.switchMode);
 
   const [prompt, setPrompt] = useState<string | null>(null);
-  const playChime = useChime();
 
-  // Single authoritative countdown. Reads/writes fresh state via getState()
-  // inside the interval, so there is no stale-closure risk.
-  useEffect(() => {
-    if (!isRunning) return;
-    const interval = setInterval(() => {
-      useProdStore.getState().tick();
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isRunning]);
-
-  // React to a completed session: chime + prompt for the next phase.
+  // This widget only displays. The countdown and the chime belong to TimerClock,
+  // which is mounted once however many widgets are on screen.
   const prevCompletions = useRef(completions);
   useEffect(() => {
     if (completions === prevCompletions.current) return;
     prevCompletions.current = completions;
-    playChime();
     // `mode` is already the upcoming mode (the store switched on completion).
     setPrompt(`Time's up! ${TIMER_MODE_LABELS[mode]} is up next.`);
-  }, [completions, mode, playChime]);
+  }, [completions, mode]);
 
   const theme = MODE_THEME[mode];
   const progress = 1 - timeLeft / TIMER_DURATIONS[mode];
@@ -134,7 +88,10 @@ export function TimerWidget() {
   };
 
   return (
-    <div className="rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+    <div
+      data-state={status}
+      className="rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]"
+    >
       {/* Mode tabs */}
       <div className="mb-3 flex gap-1 rounded-xl bg-[var(--c-beige-2)] p-1">
         {TIMER_MODES.map((m) => (

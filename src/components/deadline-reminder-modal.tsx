@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bell, CalendarClock, Check, X } from "lucide-react";
 
 import { NO_DEADLINE, useProdStore, type Task } from "@/store/use-prod-store";
+import { usePrompt } from "@/lib/use-prompt";
 import { cn } from "@/lib/utils";
 
 /* -------------------------------------------------------------------------- */
@@ -119,7 +120,8 @@ export function DeadlineReminderModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHydrated, missingKey]);
 
-  if (!open || missing.length === 0) return null;
+  const showing = usePrompt("deadlineReminder", open && missing.length > 0);
+  if (!showing) return null;
 
   const dismiss = (ms: number) => {
     writeSnooze(
@@ -151,6 +153,7 @@ export function DeadlineReminderModal({
 
   return (
     <div
+      data-prompt="deadlineReminder"
       className="fixed inset-0 z-[100] flex items-end justify-center bg-black/30 backdrop-blur-[2px] sm:items-center sm:px-4"
       onClick={() => dismiss(LATER_MS)}
     >

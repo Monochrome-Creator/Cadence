@@ -13,6 +13,7 @@ import { OverloadGuard } from "@/components/overload-guard";
 import { PwaInstallPrompt } from "@/components/pwa-install-prompt";
 import { QuickAddModal } from "@/components/quick-add-modal";
 import { SyncReviewModal } from "@/components/sync-review-modal";
+import { TimerClock } from "@/components/timer-clock";
 import { Toaster } from "@/components/toaster";
 
 const geistSans = Geist({
@@ -78,6 +79,7 @@ export default function RootLayout({
         <OverloadGuard />
         <SyncReviewModal />
         <NotificationManager />
+        <TimerClock />
         <ConnectionStatus />
         <DebugPanel />
         <PwaInstallPrompt />
