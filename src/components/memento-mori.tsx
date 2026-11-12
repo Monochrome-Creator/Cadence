@@ -217,7 +217,7 @@ export function MementoMoriGrid() {
     (state) => state.setMementoLifeExpectancy
   );
   const toggleMementoWeek = useProdStore((state) => state.toggleMementoWeek);
-  const isHydrated = useProdStore((state) => state.isHydrated);
+  const localReady = useProdStore((state) => state.localReady);
 
   // The store persists with skipHydration, so birthDate is still "" on the
   // first render even when one is saved. Deriving the setup form from hydrated
@@ -272,7 +272,7 @@ export function MementoMoriGrid() {
   };
 
   // Nothing meaningful to draw until the persisted birth date has landed.
-  if (!isHydrated) return null;
+  if (!localReady) return null;
 
   if (editing || birthDate === "") {
     return (

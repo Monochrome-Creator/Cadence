@@ -4,14 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, RefreshCw } from "lucide-react";
 
+import type { SyncStatus } from "@/lib/machines/sync";
 import { useProdStore } from "@/store/use-prod-store";
 import { getSupabaseClient } from "@/utils/supabase/client";
 
 /**
  * Cloud-connection indicator pinned to the top-right corner.
  *   - Green  → synced with Supabase.
- *   - Amber  → connecting / syncing in the background (pulses).
+ *   - Amber  → connecting / syncing in the background (pulses), or offline
+ *              changes waiting for a decision (steady).
  *   - Red    → offline.
+ *   - Grey   → not signed in.
  *
  * Tapping the dot opens a small menu with two recovery actions:
  *   - Reconnect — force a fresh sync (refreshes an expired token and pulls the
@@ -27,11 +30,22 @@ const STATUS_CONFIG = {
   // Distinct from "offline": the device is online but the server rejected the
   // write (auth/RLS/schema). Orange so it reads as "attention" not "no network".
   error: { dot: "bg-orange-500", label: "Sync error", pulse: false },
-} as const;
+  // Neither of these is a failure: nothing was lost. One is a decision waiting
+  // for the user, the other is simply nobody signed in.
+  needsReview: { dot: "bg-amber-500", label: "Review offline changes", pulse: false },
+  signedOut: { dot: "bg-stone-400", label: "Sign in to sync", pulse: false },
+  // Local-only install or demo mode: the data lives on this device.
+  disabled: { dot: "bg-rose-500", label: "Offline", pulse: false },
+} as const satisfies Record<SyncStatus, { dot: string; label: string; pulse: boolean }>;
+
+/** States worth telling a screen reader about; "Syncing…" after every edit is not. */
+const ANNOUNCED: readonly SyncStatus[] = ["offline", "error", "needsReview", "signedOut"];
 
 export function ConnectionStatus() {
-  const status = useProdStore((state) => state.connectionStatus);
-  const lastSyncError = useProdStore((state) => state.lastSyncError);
+  const status = useProdStore((state) => state.sync.status);
+  const lastSyncError = useProdStore((state) =>
+    state.sync.status === "error" ? state.sync.message : null
+  );
   const forceSync = useProdStore((state) => state.forceSync);
   const clearLocalData = useProdStore((state) => state.clearLocalData);
   const router = useRouter();
@@ -74,8 +88,12 @@ export function ConnectionStatus() {
   return (
     <div
       ref={containerRef}
+      data-state={status}
       className="fixed top-[calc(env(safe-area-inset-top)+0.5rem)] right-3 z-40 md:top-4 md:right-4"
     >
+      <span className="sr-only" aria-live="polite">
+        {ANNOUNCED.includes(status) ? label : ""}
+      </span>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

@@ -22,6 +22,14 @@ A flow with more than two states is written as an explicit machine, not as loose
 - `machines/prompts.ts`: dialogs that open on their own take turns in a fixed order. A
   dialog calls `usePrompt(id, wants)` and renders only while it returns true. To add
   one, add its id to `PROMPT_ORDER` first.
+- `machines/sync.ts`: cloud sync status (`disabled`, `signedOut`, `connecting`, `synced`,
+  `offline`, `error`, `needsReview`), held in the store as `sync`. Every pull, push and
+  sign-in event goes through `transition`; a late save result cannot overwrite a running
+  pull, and nothing but the user's decision leaves `needsReview`. `localReady` gates
+  rendering and never goes back to false; `isHydrated` only says the pull for this
+  sign-in has finished. `runSync` in the store is the one pull pipeline. Do not await
+  data calls inside the `onAuthStateChange` callback (it runs under Supabase's auth lock
+  and stalls start-up); `CloudSyncProvider` queues that work instead.
 - `src/lib/task-lifecycle.ts`: finishing a task and the Daily Action limit, shared by the
   store and the REST API. `updateTask` with `status: "Done"` and `completeTask` both
   stamp a recurring task's period, so no Done button can skip it.
