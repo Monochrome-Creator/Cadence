@@ -47,11 +47,8 @@ export function CloudSyncProvider() {
         await useProdStore.persist.rehydrate();
         if (cancelled) return;
         if (firstRun) seedDemoData();
-        useProdStore.setState({
-          isHydrated: true,
-          cloudEnabled: false,
-          connectionStatus: "offline",
-        });
+        useProdStore.getState().syncEvent({ type: "disabled" });
+        useProdStore.setState({ isHydrated: true, localReady: true });
       })();
       return () => {
         cancelled = true;
@@ -89,17 +86,21 @@ export function CloudSyncProvider() {
           if (cancelled) return;
           // getSession() transparently refreshes an expired token. A null
           // session here means the refresh token itself is gone/invalid — the
-          // user is effectively signed out, so be honest and flip the dot red
-          // instead of leaving it on a stale "synced".
+          // user is effectively signed out, so be honest and say so instead of
+          // leaving the dot on a stale "synced".
           if (!data.session) {
-            useProdStore.setState({ connectionStatus: "offline" });
+            useProdStore.getState().syncEvent({ type: "signedOut" });
             return;
           }
           setCurrentUser(data.session.user.id, data.session.user.email);
           void useProdStore.getState().forceSync();
         } catch {
           if (!cancelled) {
-            useProdStore.setState({ connectionStatus: "offline" });
+            useProdStore.getState().syncEvent({
+              type: "settled",
+              by: "background",
+              outcome: { ok: false, reason: "network" },
+            });
           }
         }
       })();
@@ -138,48 +139,64 @@ export function CloudSyncProvider() {
 
       // 2b. Wait for Supabase to confirm auth state before touching the DB.
       //     `INITIAL_SESSION` fires once on startup (may carry null session).
-      //     `SIGNED_IN` fires when the user explicitly logs in mid-session.
-      const { data } = supabase.auth.onAuthStateChange(async (event, session) => {
+      //     `SIGNED_IN` fires when the user explicitly logs in mid-session, and
+      //     also at startup when the stored session is still valid.
+      //
+      // Supabase awaits this callback while it holds its auth lock, and at
+      // startup that lock covers its own initialisation, which every data call
+      // waits for. Awaiting data calls inside the callback therefore stalled the
+      // first sync after a reload until they timed out: about a minute of
+      // "Syncing…", with a false "Offline" on the way. So the callback only
+      // records who is signed in; the cloud work runs after it returns, one
+      // event at a time.
+      let cloudWork: Promise<void> = Promise.resolve();
+
+      const onSession = async (
+        event: "SIGNED_IN" | "INITIAL_SESSION" | "TOKEN_REFRESHED",
+        userId: string,
+        email: string | undefined
+      ) => {
+        if (cancelled) return;
+
+        if (event === "SIGNED_IN") {
+          // User just logged in after the app was already open (e.g. came from
+          // the login page). `INITIAL_SESSION` with no session previously set
+          // isHydrated: true, which would cause hydrate() to exit immediately.
+          // Reset it so the full cloud pull runs for the now-authenticated user.
+          // Screens stay mounted meanwhile: they gate on `localReady`.
+          useProdStore.setState({ isHydrated: false });
+        }
+
+        // Only run the full sync on session establishment, not token refresh.
+        if (event !== "TOKEN_REFRESHED") {
+          // Session confirmed — write the users row then pull cloud data.
+          await ensureUserRow(userId, email);
+          await hydrate();
+
+          // If the DB was cold and the first sync failed, retry once after a
+          // short pause to give Postgres time to finish waking up.
+          if (!cancelled && useProdStore.getState().sync.status === "offline") {
+            setTimeout(() => void useProdStore.getState().forceSync(), 6_000);
+          }
+        } else if (useProdStore.getState().sync.status === "offline") {
+          // A token just refreshed (e.g. auto-refresh fired on focus) after a
+          // period where writes were failing — retry the pending sync now
+          // that we hold a valid token again.
+          void useProdStore.getState().forceSync();
+        }
+      };
+
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
         if (cancelled) return;
 
         if ((event === "SIGNED_IN" || event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") && session) {
           // Cache the confirmed identity so every data op (pullTasks, pushTasks,
           // ensureUserRow) can use it without an extra network call.
-          setCurrentUser(session.user.id, session.user.email);
-
-          if (event === "SIGNED_IN") {
-            // User just logged in after the app was already open (e.g. came from
-            // the login page). `INITIAL_SESSION` with no session previously set
-            // isHydrated: true, which would cause hydrate() to exit immediately.
-            // Reset it so the full cloud pull runs for the now-authenticated user.
-            useProdStore.setState({ isHydrated: false });
-          }
-
-          // Only run the full sync on session establishment, not token refresh.
-          if (event !== "TOKEN_REFRESHED") {
-            // Session confirmed — write the users row then pull cloud data.
-            await ensureUserRow(session.user.id, session.user.email ?? undefined);
-            await hydrate();
-
-            // If the DB was cold and the first sync failed, retry once after a
-            // short pause to give Postgres time to finish waking up.
-            if (
-              !cancelled &&
-              useProdStore.getState().connectionStatus === "offline"
-            ) {
-              setTimeout(
-                () => void useProdStore.getState().forceSync(),
-                6_000
-              );
-            }
-          } else if (
-            useProdStore.getState().connectionStatus === "offline"
-          ) {
-            // A token just refreshed (e.g. auto-refresh fired on focus) after a
-            // period where writes were failing — retry the pending sync now
-            // that we hold a valid token again.
-            void useProdStore.getState().forceSync();
-          }
+          const { id, email } = session.user;
+          setCurrentUser(id, email);
+          cloudWork = cloudWork
+            .then(() => onSession(event, id, email))
+            .catch((error) => console.error("[cadence] sign-in sync failed", error));
         } else if (
           event === "SIGNED_OUT" ||
           (event === "INITIAL_SESSION" && !session)
@@ -187,7 +204,8 @@ export function CloudSyncProvider() {
           // Clear the cached identity so stale user data is never used.
           setCurrentUser(null);
           // No session — mark as hydrated so UI stops showing "Syncing".
-          useProdStore.setState({ connectionStatus: "offline", isHydrated: true });
+          useProdStore.getState().syncEvent({ type: "signedOut" });
+          useProdStore.setState({ isHydrated: true, localReady: true });
         }
       });
 

@@ -47,6 +47,14 @@ import {
   type PromptQueue,
 } from "@/lib/machines/prompts";
 import {
+  initial as initialSync,
+  isSyncRunning,
+  transition as syncTransition,
+  type SyncEvent,
+  type SyncFailure,
+  type SyncState,
+} from "@/lib/machines/sync";
+import {
   MAX_TODAY_TASKS,
   completeTask as asCompleted,
   countActiveToday,
@@ -648,16 +656,7 @@ export function computeHistoryStats(
   return { streak, bestStreak, days, week };
 }
 
-/**
- * Cloud connection state surfaced by the UI status dot:
- *  - "synced"     — last cloud round-trip succeeded.
- *  - "connecting" — a pull/push is in flight.
- *  - "offline"    — cloud disabled, signed out, or an actual network drop.
- *  - "error"      — the server rejected the write (auth/RLS/schema). The device
- *                   is online; the request failed. Distinct from "offline" so a
- *                   401/403 never masquerades as a network outage.
- */
-export type ConnectionStatus = "synced" | "connecting" | "offline" | "error";
+// The cloud connection status and its rules live in src/lib/machines/sync.ts.
 
 /**
  * A held-back "offline changes vs. cloud" comparison, surfaced when a reconnect
@@ -745,16 +744,23 @@ interface ProdState {
   pendingReview: PendingReview | null;
 
   // Cloud sync
-  /** Whether Supabase credentials are present and cloud sync is active. */
-  cloudEnabled: boolean;
-  /** True once the initial cloud pull (or local fallback) has completed. */
+  /**
+   * True once the first load has settled: local data is restored and the first
+   * cloud pull has finished or been skipped. Never goes back to false, so a
+   * screen gated on it does not unmount when a later sign-in pulls again.
+   */
+  localReady: boolean;
+  /**
+   * True once the cloud pull for the current sign-in has finished (or there is
+   * no cloud). Reset on sign-in so effects that need fresh data run again; gate
+   * rendering on `localReady` instead.
+   */
   isHydrated: boolean;
-  /** True while a pull/push round-trip is in flight. */
-  isSyncing: boolean;
-  /** Cloud connection status driving the header status dot. */
-  connectionStatus: ConnectionStatus;
-  /** Last server-side sync error message (null when none) — shown when status is "error". */
-  lastSyncError: string | null;
+  /**
+   * Cloud sync status, including the offline-changes review when one is
+   * waiting: src/lib/machines/sync.ts.
+   */
+  sync: SyncState;
   /**
    * Durable offline outbox: task ids with local edits/creations that haven't
    * been confirmed synced to the cloud. Persisted so unsynced work survives a
@@ -770,11 +776,6 @@ interface ProdState {
    * elsewhere (e.g. via the API) by a device holding a stale copy.
    */
   unsyncedDeletedSubtaskIds: string[];
-  /**
-   * When set, a reconnect found unsynced local changes and paused instead of
-   * overwriting them — the sync-review modal renders from this. Null otherwise.
-   */
-  pendingSync: PendingSync | null;
 
   // Timer
   timer: TimerState;
@@ -1008,15 +1009,17 @@ interface ProdState {
    */
   forceSync: () => Promise<void>;
   /**
-   * Resolves a {@link pendingSync} prompt by pushing the unsynced local edits
+   * Resolves the offline-changes review by pushing the unsynced local edits
    * (and deletions) to the cloud, then re-pulling the merged canonical set.
    */
   applyPendingSync: () => Promise<void>;
   /**
-   * Resolves a {@link pendingSync} prompt by discarding the local-only unsynced
+   * Resolves the offline-changes review by discarding the local-only unsynced
    * changes and adopting the cloud copy instead.
    */
   discardPendingSync: () => void;
+  /** Reports a sign-in or connection event from outside the store to the sync machine. */
+  syncEvent: (event: SyncEvent) => void;
   /**
    * Wipes the persisted local cache and resets in-memory state to empty. Called
    * on explicit sign-out so no account data lingers on a shared device.
@@ -1267,29 +1270,15 @@ function advanceDeadlineToCurrentPeriod(
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingTaskIds = new Set<string>();
 
-/**
- * Maps a cloud-write {@link SyncOutcome} onto the connection status.
- *
- * The key fix: a server rejection (auth/RLS/schema) is NOT a network outage.
- * Only a real network drop (or signed-out/unconfigured) flips the dot to
- * "offline"; auth/data rejections become the distinct "error" status so a
- * 401/403 can never masquerade as "Offline" — and the real message is kept in
- * `lastSyncError` for display/diagnosis.
- */
-function applyPushOutcome(outcome: SyncOutcome): void {
-  if (outcome.ok) {
-    useProdStore.setState({ connectionStatus: "synced", lastSyncError: null });
-    return;
-  }
-  if (outcome.reason === "network" || outcome.reason === "unavailable") {
-    useProdStore.setState({ connectionStatus: "offline" });
-  } else {
-    useProdStore.setState({
-      connectionStatus: "error",
-      lastSyncError: outcome.message ?? "Sync failed",
-    });
-  }
+/** Every change of sync status goes through the machine in src/lib/machines/sync.ts. */
+function sendSync(event: SyncEvent): void {
+  useProdStore.setState((state) => {
+    const sync = syncTransition(state.sync, event);
+    return sync === state.sync ? state : { sync };
+  });
 }
+
+const OFFLINE: SyncFailure = { ok: false, reason: "network" };
 
 /**
  * Marks task ids as locally-dirty (unsynced) in the durable outbox. A re-edited
@@ -1377,9 +1366,9 @@ function queueTaskPush(getState: () => ProdState, taskIds: string[]): void {
     const tasks = getState().tasks.filter((task) => ids.has(task.id));
     if (tasks.length === 0) return;
     const removed = [...getState().unsyncedDeletedSubtaskIds];
-    useProdStore.setState({ connectionStatus: "connecting" });
+    sendSync({ type: "started", by: "background" });
     void pushTasks(tasks, removed).then((outcome) => {
-      applyPushOutcome(outcome);
+      sendSync({ type: "settled", by: "background", outcome });
       // Only clear the outbox on a confirmed success — a failed push keeps the
       // ids marked so the next reconnect can recover them.
       if (outcome.ok) {
@@ -1396,6 +1385,159 @@ function queueAllTasksPush(getState: () => ProdState): void {
     getState,
     getState().tasks.map((task) => task.id)
   );
+}
+
+/**
+ * The one pull pipeline, for the first load after sign-in (`initial`) and for every
+ * later refresh. They differ only where marked: a refresh first renews the session
+ * and flushes edits still waiting to be pushed; the first load seeds the category
+ * list when the cloud has none.
+ */
+async function runSync({ initial }: { initial: boolean }): Promise<void> {
+  const get = useProdStore.getState;
+  const set = useProdStore.setState;
+  // Offline changes are waiting for a decision: pulling now could adopt the cloud
+  // copy underneath the open review.
+  if (get().sync.status === "needsReview") return;
+  const wasSignedOut = get().sync.status === "signedOut";
+  sendSync({ type: "started", by: "sync" });
+  const settle = (outcome: SyncOutcome) =>
+    sendSync({ type: "settled", by: "sync", outcome });
+  try {
+    if (!initial) {
+      // Renew the auth session up front so a wedged/expired token (after the tab
+      // sat idle) is refreshed before any read/write. This is what makes the
+      // "Reconnect" button recover instead of reusing the dead token.
+      const hasSession = await refreshSession();
+      if (!hasSession && wasSignedOut) {
+        // Still nobody signed in: say so, rather than calling it "Offline".
+        sendSync({ type: "signedOut" });
+        return;
+      }
+
+      // Flush any debounced task edits first so local changes reach the cloud
+      // before we overwrite local state with the pulled cloud copy.
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        const ids = new Set(pendingTaskIds);
+        pendingTaskIds.clear();
+        const pending = get().tasks.filter((t) => ids.has(t.id));
+        if (pending.length > 0) {
+          const removed = [...get().unsyncedDeletedSubtaskIds];
+          const outcome = await pushTasks(pending, removed);
+          if (!outcome.ok) {
+            settle(outcome);
+            return;
+          }
+          // Confirmed — drop these from the outbox so they don't trip the guard.
+          clearUnsynced([...ids]);
+          clearDeletedSubtasks(removed);
+        }
+      }
+
+      // On the first load this already ran in CloudSyncProvider's
+      // onAuthStateChange handler, which fires only after Supabase has confirmed
+      // a valid session — eliminating the startup race where the access token
+      // may not yet be ready.
+      await ensureUserRow();
+    }
+
+    const cloudTasks = await pullTasks();
+    if (cloudTasks === null) {
+      // Read failed (offline, signed out, or timeout) — stay on local state and
+      // flag the disconnect.
+      settle(OFFLINE);
+      return;
+    }
+    if (cloudTasks.length > 0) {
+      // Guard unsynced local edits: if the durable outbox holds changes the
+      // cloud copy would clobber, pause and surface the sync-review modal
+      // instead of silently overwriting the user's offline work.
+      const guard = buildPendingSync(get(), cloudTasks);
+      if (guard) {
+        sendSync({ type: "reviewNeeded", pending: guard });
+        return;
+      }
+      // Cloud is the source of truth on subsequent devices/sessions.
+      set({ tasks: cloudTasks });
+    } else if (get().tasks.length > 0) {
+      // Cloud is empty: seed it from local so nothing is lost. If this fails
+      // (e.g. users FK row not yet created), surface the real reason — a network
+      // drop shows "offline", an auth/schema rejection shows "error" — so we
+      // never display a false "Synced" nor a false "Offline".
+      const outcome = await pushTasks(get().tasks);
+      if (!outcome.ok) {
+        settle(outcome);
+        return;
+      }
+    }
+
+    // Managed category list: adopt the cloud copy. Only the first load seeds it
+    // when the cloud has none; a refresh leaves the local list alone.
+    const cloudCategories = await pullCategories();
+    if (cloudCategories === null) {
+      // Read failed — keep the local list.
+    } else if (cloudCategories.length > 0) {
+      set({ categories: cloudCategories });
+    } else if (initial) {
+      const seeded = deriveCategories(get().tasks);
+      set({ categories: seeded });
+      await pushCategories(seeded);
+    }
+
+    // Daily plan + pending review: adopt the cloud copy when present so the
+    // plan and missed-task review follow the user across devices.
+    const cloudPlan = await pullDailyPlan();
+    if (cloudPlan) {
+      set({
+        dailyPlan: cloudPlan.plan ?? get().dailyPlan,
+        pendingReview: cloudPlan.review ?? get().pendingReview,
+      });
+    }
+    // North Star goals: adopt the cloud copy when present, or seed it from
+    // local so existing local data isn't lost.
+    const cloudGoals = await pullGoals();
+    if (cloudGoals === null) {
+      // Read failed — keep the local list.
+    } else if (cloudGoals.length > 0) {
+      set({ goals: cloudGoals });
+    } else if (get().goals.length > 0) {
+      await pushGoals(get().goals);
+    }
+    // Mandala (core + themes): adopt the cloud copy when present, or seed it
+    // from local.
+    const cloudMandala = await pullMandala();
+    if (cloudMandala === null) {
+      // Read failed — keep local.
+    } else if (cloudMandala.themes.length > 0 || cloudMandala.core) {
+      set({ themes: cloudMandala.themes, mandalaCore: cloudMandala.core });
+    } else if (get().themes.length > 0 || get().mandalaCore) {
+      await pushMandala({ core: get().mandalaCore, themes: get().themes });
+    }
+    // Memento Mori: adopt the cloud copy when present, or seed it from local.
+    const cloudMemento = await pullMemento();
+    if (cloudMemento === null) {
+      // Read failed — keep local.
+    } else if (cloudMemento.birthDate) {
+      set({
+        mementoBirthDate: cloudMemento.birthDate,
+        mementoLifeExpectancy: cloudMemento.lifeExpectancyYears,
+        mementoCheckedWeeks: cloudMemento.checkedWeeks,
+      });
+    } else if (get().mementoBirthDate) {
+      await pushMemento({
+        birthDate: get().mementoBirthDate,
+        lifeExpectancyYears: get().mementoLifeExpectancy,
+        checkedWeeks: get().mementoCheckedWeeks,
+      });
+    }
+
+    settle({ ok: true });
+  } catch (error) {
+    console.error(`[cadence] ${initial ? "hydrate" : "forceSync"} failed`, error);
+    settle(OFFLINE);
+  }
 }
 
 /** Persist the managed category list to the cloud (no-op when unconfigured). */
@@ -1453,17 +1595,14 @@ export const useProdStore = create<ProdState>()(
   dailyPlan: null,
   pendingReview: null,
 
-  cloudEnabled: isSupabaseConfigured,
+  localReady: false,
   isHydrated: false,
-  isSyncing: false,
-  // Start "connecting" when cloud is on (hydrate runs at mount); otherwise the
-  // app is purely local, which we surface as "offline" (on-device data).
-  connectionStatus: isSupabaseConfigured ? "connecting" : "offline",
-  lastSyncError: null,
+  // "Connecting" when cloud is on (the pull runs once sign-in is confirmed);
+  // "disabled" when the app is purely local.
+  sync: initialSync(isSupabaseConfigured),
   unsyncedTaskIds: [],
   unsyncedDeletedIds: [],
   unsyncedDeletedSubtaskIds: [],
-  pendingSync: null,
 
   timer: initialTimer,
   timerNow: 0,
@@ -1588,9 +1727,9 @@ export const useProdStore = create<ProdState>()(
           : state.unsyncedDeletedIds,
     }));
     if (isSupabaseConfigured) {
-      set({ connectionStatus: "connecting" });
+      sendSync({ type: "started", by: "background" });
       void deleteTaskRemote(id).then((outcome) => {
-        applyPushOutcome(outcome);
+        sendSync({ type: "settled", by: "background", outcome });
         if (outcome.ok) {
           set((state) => ({
             unsyncedDeletedIds: state.unsyncedDeletedIds.filter((t) => t !== id),
@@ -2280,239 +2419,31 @@ export const useProdStore = create<ProdState>()(
 
   hydrate: async () => {
     if (!isSupabaseConfigured || get().isHydrated) {
-      set({ isHydrated: true });
+      set({ isHydrated: true, localReady: true });
       return;
     }
-    set({ isSyncing: true, connectionStatus: "connecting" });
     try {
-      // ensureUserRow() is intentionally NOT called here.
-      // It runs inside CloudSyncProvider's onAuthStateChange handler, which
-      // fires only after Supabase has confirmed a valid session — eliminating
-      // the startup race where the access token may not yet be ready.
-      const cloudTasks = await pullTasks();
-      if (cloudTasks === null) {
-        // Read failed (offline, signed out, or timeout) — stay on local state
-        // but mark hydrated so the UI loads, and flag the disconnect.
-        set({ connectionStatus: "offline" });
-        return;
-      }
-      if (cloudTasks.length > 0) {
-        // Guard unsynced local edits: if the durable outbox holds changes the
-        // cloud copy would clobber, pause and surface the sync-review modal
-        // instead of silently overwriting the user's offline work.
-        const guard = buildPendingSync(get(), cloudTasks);
-        if (guard) {
-          set({
-            pendingSync: guard,
-            connectionStatus: "error",
-            lastSyncError: "You have offline changes to review.",
-          });
-          return;
-        }
-        // Cloud is the source of truth on subsequent devices/sessions.
-        set({ tasks: cloudTasks });
-      } else if (get().tasks.length > 0) {
-        // First run with local tasks: seed the cloud. If this fails (e.g.
-        // users FK row not yet created), surface the real reason — a network
-        // drop shows "offline", an auth/schema rejection shows "error" — so we
-        // never display a false "Synced" nor a false "Offline".
-        const outcome = await pushTasks(get().tasks);
-        if (!outcome.ok) {
-          applyPushOutcome(outcome);
-          return;
-        }
-      }
-
-      // Managed category list: adopt the cloud copy, or seed it on first run.
-      const cloudCategories = await pullCategories();
-      if (cloudCategories === null) {
-        // Read failed — keep the local list.
-      } else if (cloudCategories.length > 0) {
-        set({ categories: cloudCategories });
-      } else {
-        const seeded = deriveCategories(get().tasks);
-        set({ categories: seeded });
-        await pushCategories(seeded);
-      }
-
-      // Daily plan + pending review: adopt the cloud copy when present so the
-      // plan and missed-task review follow the user across devices.
-      const cloudPlan = await pullDailyPlan();
-      if (cloudPlan) {
-        set({
-          dailyPlan: cloudPlan.plan ?? get().dailyPlan,
-          pendingReview: cloudPlan.review ?? get().pendingReview,
-        });
-      }
-      // North Star goals: adopt the cloud copy when present, or seed it from
-      // local on first run so existing local data isn't lost.
-      const cloudGoals = await pullGoals();
-      if (cloudGoals === null) {
-        // Read failed — keep the local list.
-      } else if (cloudGoals.length > 0) {
-        set({ goals: cloudGoals });
-      } else if (get().goals.length > 0) {
-        await pushGoals(get().goals);
-      }
-      // Mandala (core + themes): adopt the cloud copy when present, or seed it
-      // from local on first run.
-      const cloudMandala = await pullMandala();
-      if (cloudMandala === null) {
-        // Read failed — keep local.
-      } else if (cloudMandala.themes.length > 0 || cloudMandala.core) {
-        set({ themes: cloudMandala.themes, mandalaCore: cloudMandala.core });
-      } else if (get().themes.length > 0 || get().mandalaCore) {
-        await pushMandala({ core: get().mandalaCore, themes: get().themes });
-      }
-      // Memento Mori: adopt the cloud copy when present, or seed it from
-      // local on first run.
-      const cloudMemento = await pullMemento();
-      if (cloudMemento === null) {
-        // Read failed — keep local.
-      } else if (cloudMemento.birthDate) {
-        set({
-          mementoBirthDate: cloudMemento.birthDate,
-          mementoLifeExpectancy: cloudMemento.lifeExpectancyYears,
-          mementoCheckedWeeks: cloudMemento.checkedWeeks,
-        });
-      } else if (get().mementoBirthDate) {
-        await pushMemento({
-          birthDate: get().mementoBirthDate,
-          lifeExpectancyYears: get().mementoLifeExpectancy,
-          checkedWeeks: get().mementoCheckedWeeks,
-        });
-      }
-
-      set({ connectionStatus: "synced" });
-    } catch (error) {
-      console.error("[cadence] hydrate failed", error);
-      set({ connectionStatus: "offline" });
+      await runSync({ initial: true });
     } finally {
-      set({ isHydrated: true, isSyncing: false });
+      set({ isHydrated: true, localReady: true });
     }
   },
 
   forceSync: async () => {
     // Purely local install — there's no cloud to refresh against.
-    if (!isSupabaseConfigured) {
-      set({ connectionStatus: "offline" });
-      return;
-    }
+    if (!isSupabaseConfigured) return;
     // Skip if a sync (initial hydrate or another refresh) is already running.
-    if (get().isSyncing) return;
-    set({ isSyncing: true, connectionStatus: "connecting" });
-    try {
-      // Renew the auth session up front so a wedged/expired token (after the tab
-      // sat idle) is refreshed before any read/write. This is what makes the
-      // "Reconnect" button recover instead of reusing the dead token.
-      await refreshSession();
-
-      // Flush any debounced task edits first so local changes reach the cloud
-      // before we overwrite local state with the pulled cloud copy.
-      if (pushTimer !== null) {
-        clearTimeout(pushTimer);
-        pushTimer = null;
-        const ids = new Set(pendingTaskIds);
-        pendingTaskIds.clear();
-        const pending = get().tasks.filter((t) => ids.has(t.id));
-        if (pending.length > 0) {
-          const removed = [...get().unsyncedDeletedSubtaskIds];
-          const outcome = await pushTasks(pending, removed);
-          if (!outcome.ok) {
-            applyPushOutcome(outcome);
-            return;
-          }
-          // Confirmed — drop these from the outbox so they don't trip the guard.
-          clearUnsynced([...ids]);
-          clearDeletedSubtasks(removed);
-        }
-      }
-
-      await ensureUserRow();
-      const cloudTasks = await pullTasks();
-      if (cloudTasks === null) {
-        // Read failed/timed out — keep local data, report the disconnect.
-        set({ connectionStatus: "offline" });
-        return;
-      }
-      if (cloudTasks.length > 0) {
-        // Guard unsynced local edits before overwriting: surface the review
-        // modal instead of clobbering offline work the push above couldn't land.
-        const guard = buildPendingSync(get(), cloudTasks);
-        if (guard) {
-          set({
-            pendingSync: guard,
-            connectionStatus: "error",
-            lastSyncError: "You have offline changes to review.",
-          });
-          return;
-        }
-        // Adopt the cloud copy (persist middleware writes it to localStorage).
-        set({ tasks: cloudTasks });
-      } else if (get().tasks.length > 0) {
-        // Cloud is empty — seed it from local so nothing is lost.
-        const outcome = await pushTasks(get().tasks);
-        if (!outcome.ok) {
-          applyPushOutcome(outcome);
-          return;
-        }
-      }
-      const cloudCategories = await pullCategories();
-      if (cloudCategories && cloudCategories.length > 0) {
-        set({ categories: cloudCategories });
-      }
-      const cloudPlan = await pullDailyPlan();
-      if (cloudPlan) {
-        set({
-          dailyPlan: cloudPlan.plan ?? get().dailyPlan,
-          pendingReview: cloudPlan.review ?? get().pendingReview,
-        });
-      }
-      const cloudGoals = await pullGoals();
-      if (cloudGoals === null) {
-        // Read failed — keep local.
-      } else if (cloudGoals.length > 0) {
-        set({ goals: cloudGoals });
-      } else if (get().goals.length > 0) {
-        await pushGoals(get().goals);
-      }
-      const cloudMandala = await pullMandala();
-      if (cloudMandala === null) {
-        // Read failed — keep local.
-      } else if (cloudMandala.themes.length > 0 || cloudMandala.core) {
-        set({ themes: cloudMandala.themes, mandalaCore: cloudMandala.core });
-      } else if (get().themes.length > 0 || get().mandalaCore) {
-        await pushMandala({ core: get().mandalaCore, themes: get().themes });
-      }
-      const cloudMemento = await pullMemento();
-      if (cloudMemento === null) {
-        // Read failed — keep local.
-      } else if (cloudMemento.birthDate) {
-        set({
-          mementoBirthDate: cloudMemento.birthDate,
-          mementoLifeExpectancy: cloudMemento.lifeExpectancyYears,
-          mementoCheckedWeeks: cloudMemento.checkedWeeks,
-        });
-      } else if (get().mementoBirthDate) {
-        await pushMemento({
-          birthDate: get().mementoBirthDate,
-          lifeExpectancyYears: get().mementoLifeExpectancy,
-          checkedWeeks: get().mementoCheckedWeeks,
-        });
-      }
-      set({ connectionStatus: "synced" });
-    } catch (error) {
-      console.error("[cadence] forceSync failed", error);
-      set({ connectionStatus: "offline" });
-    } finally {
-      set({ isSyncing: false });
-    }
+    if (isSyncRunning(get().sync)) return;
+    await runSync({ initial: false });
   },
 
   applyPendingSync: async () => {
-    const pending = get().pendingSync;
-    if (!pending) return;
-    set({ pendingSync: null, isSyncing: true, connectionStatus: "connecting" });
+    const { sync } = get();
+    if (sync.status !== "needsReview" || sync.saving) return;
+    const pending = sync.pending;
+    // The review stays open while this runs, so nothing else can be edited
+    // underneath it and a failure has somewhere to be shown.
+    sendSync({ type: "saveStarted" });
     try {
       await refreshSession();
       await ensureUserRow();
@@ -2523,44 +2454,60 @@ export const useProdStore = create<ProdState>()(
       if (toPush.length > 0) {
         const outcome = await pushTasks(toPush, get().unsyncedDeletedSubtaskIds);
         if (!outcome.ok) {
-          applyPushOutcome(outcome);
-          // Keep the prompt (and the outbox) so the user can retry once the
+          // Keep the review (and the outbox) so the user can retry once the
           // connection recovers — their offline work is never dropped.
-          set({ pendingSync: pending });
+          sendSync({ type: "saveFailed", outcome, pending });
           return;
         }
       }
-      // Propagate offline deletions.
+      // Propagate offline deletions. deleteTaskRemote reports a failure in its
+      // result instead of throwing, so each outcome is checked: a delete that
+      // did not reach the cloud must stay in the outbox, or the task comes back
+      // on the next pull with nothing left to remove it.
+      const failedDeletes: string[] = [];
+      let failure: SyncFailure | null = null;
       for (const id of pending.deletedIds) {
-        await deleteTaskRemote(id);
+        const outcome = await deleteTaskRemote(id);
+        if (outcome.ok) continue;
+        failedDeletes.push(id);
+        failure ??= outcome;
+      }
+      if (failure) {
+        set((state) => ({
+          unsyncedDeletedIds: state.unsyncedDeletedIds.filter((id) =>
+            failedDeletes.includes(id)
+          ),
+        }));
+        sendSync({
+          type: "saveFailed",
+          outcome: failure,
+          pending: { ...pending, deletedIds: failedDeletes },
+        });
+        return;
       }
       // Outbox is flushed — clear it before adopting the merged cloud copy.
       set({ unsyncedTaskIds: [], unsyncedDeletedIds: [], unsyncedDeletedSubtaskIds: [] });
       const merged = await pullTasks();
       if (merged !== null) set({ tasks: merged });
-      set({ connectionStatus: "synced", lastSyncError: null });
+      sendSync({ type: "reviewResolved" });
     } catch (error) {
       console.error("[cadence] applyPendingSync failed", error);
-      // Restore the prompt so a transient failure doesn't strand the changes.
-      set({ pendingSync: pending, connectionStatus: "offline" });
-    } finally {
-      set({ isSyncing: false });
+      // Keep the review so a transient failure doesn't strand the changes.
+      sendSync({ type: "saveFailed", outcome: OFFLINE, pending });
     }
   },
 
   discardPendingSync: () => {
-    const pending = get().pendingSync;
-    if (!pending) return;
+    const { sync } = get();
+    if (sync.status !== "needsReview" || sync.saving) return;
     // Drop the local-only unsynced work and adopt the cloud copy wholesale.
     set({
-      tasks: pending.cloudTasks,
+      tasks: sync.pending.cloudTasks,
       unsyncedTaskIds: [],
       unsyncedDeletedIds: [],
       unsyncedDeletedSubtaskIds: [],
-      pendingSync: null,
-      connectionStatus: "synced",
-      lastSyncError: null,
     });
+    sendSync({ type: "reviewResolved" });
   },
 
   clearLocalData: () => {
@@ -2584,8 +2531,9 @@ export const useProdStore = create<ProdState>()(
       unsyncedTaskIds: [],
       unsyncedDeletedIds: [],
       unsyncedDeletedSubtaskIds: [],
-      pendingSync: null,
     });
+    // An explicit sign-out also ends any open offline-changes review.
+    sendSync({ type: "signedOut" });
   },
 
   startTimer: () => {
@@ -2670,6 +2618,8 @@ export const useProdStore = create<ProdState>()(
     if (creditedTaskId) queueTaskPush(get, [creditedTaskId]);
   },
 
+  syncEvent: (event) => sendSync(event),
+
   requestPrompt: (id) =>
     set((state) => ({
       prompts: promptTransition(state.prompts, { type: "request", id }),
@@ -2703,7 +2653,7 @@ export const useProdStore = create<ProdState>()(
         dailyPlan: state.dailyPlan,
         pendingReview: state.pendingReview,
         // Persist the offline outbox so unsynced work survives a reload/idle and
-        // can be recovered on the next reconnect. pendingSync is runtime-only.
+        // can be recovered on the next reconnect. The review itself is runtime-only.
         unsyncedTaskIds: state.unsyncedTaskIds,
         unsyncedDeletedIds: state.unsyncedDeletedIds,
         unsyncedDeletedSubtaskIds: state.unsyncedDeletedSubtaskIds,

@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { CloudUpload, Pencil, Plus, Trash2, UploadCloud } from "lucide-react";
 
 import { useProdStore, type Task } from "@/store/use-prod-store";
+import { pendingReviewOf } from "@/lib/machines/sync";
 import { usePrompt } from "@/lib/use-prompt";
 
 /* -------------------------------------------------------------------------- */
@@ -28,8 +29,13 @@ type Change =
   | { kind: "delete"; id: string; title: string };
 
 export function SyncReviewModal() {
-  const pendingSync = useProdStore((s) => s.pendingSync);
-  const isSyncing = useProdStore((s) => s.isSyncing);
+  const pendingSync = useProdStore((s) => pendingReviewOf(s.sync));
+  const saving = useProdStore(
+    (s) => s.sync.status === "needsReview" && s.sync.saving
+  );
+  const failure = useProdStore((s) =>
+    s.sync.status === "needsReview" ? s.sync.failure : null
+  );
   const applyPendingSync = useProdStore((s) => s.applyPendingSync);
   const discardPendingSync = useProdStore((s) => s.discardPendingSync);
 
@@ -130,12 +136,23 @@ export function SyncReviewModal() {
           </div>
         </div>
 
+        {failure && (
+          <p
+            role="alert"
+            className="mx-5 mt-3 rounded-lg bg-orange-50 px-3 py-2 text-[12px] leading-snug text-orange-900"
+          >
+            {failure.reason === "network" || failure.reason === "unavailable"
+              ? "Couldn't reach the cloud. Your changes are still here. Try again when you're back online."
+              : `Couldn't save: ${failure.message ?? "the cloud rejected the changes"}. Your changes are still here.`}
+          </p>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 p-5">
           <button
             type="button"
             onClick={() => discardPendingSync()}
-            disabled={isSyncing}
+            disabled={saving}
             className="rounded-full px-4 py-2 text-[13px] font-medium text-[var(--c-ink-3)] transition-colors hover:bg-[var(--c-beige)] hover:text-[var(--c-ink-2)] disabled:opacity-40"
           >
             Discard &amp; use cloud
@@ -143,11 +160,11 @@ export function SyncReviewModal() {
           <button
             type="button"
             onClick={() => void applyPendingSync()}
-            disabled={isSyncing}
+            disabled={saving}
             className="inline-flex items-center gap-1.5 rounded-full bg-[#a35d4d] px-4 py-2 text-[13px] font-medium text-white transition-colors hover:bg-[#8f4f41] disabled:opacity-40"
           >
             <UploadCloud className="size-4" />
-            {isSyncing ? "Saving…" : "Save my changes"}
+            {saving ? "Saving…" : "Save my changes"}
           </button>
         </div>
       </div>
