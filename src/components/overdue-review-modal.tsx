@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { todayKey, useProdStore, type Task } from "@/store/use-prod-store";
+import { usePrompt } from "@/lib/use-prompt";
 import { cn } from "@/lib/utils";
 
 /* -------------------------------------------------------------------------- */
@@ -115,8 +116,7 @@ export function OverdueReviewModal() {
   const pendingReview = useProdStore((s) => s.pendingReview);
   const postponeTask = useProdStore((s) => s.postponeTask);
   const skipRecurrence = useProdStore((s) => s.skipRecurrence);
-  const completeAndRepeatTask = useProdStore((s) => s.completeAndRepeatTask);
-  const updateTask = useProdStore((s) => s.updateTask);
+  const completeTask = useProdStore((s) => s.completeTask);
   const deleteTask = useProdStore((s) => s.deleteTask);
 
   // Auth screens (login / password reset / OAuth callback) render their own
@@ -162,7 +162,11 @@ export function OverdueReviewModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthRoute, isHydrated, overdueKey, pendingReview]);
 
-  if (isAuthRoute || !open || overdue.length === 0) return null;
+  const showing = usePrompt(
+    "overdueReview",
+    !isAuthRoute && open && overdue.length > 0
+  );
+  if (!showing) return null;
 
   const dismiss = (ms: number) => {
     writeSnooze(
@@ -186,6 +190,7 @@ export function OverdueReviewModal() {
 
   return (
     <div
+      data-prompt="overdueReview"
       className="fixed inset-0 z-[60] flex items-end justify-center bg-[rgba(40,33,28,0.35)] p-4 backdrop-blur-sm sm:items-center"
       onClick={() => dismiss(LATER_MS)}
     >
@@ -333,11 +338,7 @@ export function OverdueReviewModal() {
                     )}
                     <button
                       type="button"
-                      onClick={() =>
-                        repeats
-                          ? completeAndRepeatTask(task.id)
-                          : updateTask(task.id, { status: "Done" })
-                      }
+                      onClick={() => completeTask(task.id)}
                       title="Mark done"
                       className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-[#eef0e7] px-3 text-[13px] font-medium text-[#5f6b4a] transition-colors hover:bg-[#e3e8d6]"
                     >

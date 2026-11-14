@@ -1212,9 +1212,6 @@ function SortableTaskCard({
   const sendTaskToToday = useProdStore((state) => state.sendTaskToToday);
   const returnTaskToInbox = useProdStore((state) => state.returnTaskToInbox);
   const showToast = useToastStore((state) => state.showToast);
-  const completeAndRepeatTask = useProdStore(
-    (state) => state.completeAndRepeatTask
-  );
   const goals = useProdStore((state) => state.goals);
 
   // A task with no micro-tasks owns an editable manual percentage; once it has
@@ -1226,9 +1223,7 @@ function SortableTaskCard({
   // plain status write. Leaving Done clears a stale manual 100% so the bar and
   // status stay in agreement (only relevant for childless tasks).
   const handleStatusChange = (next: TaskStatus) => {
-    if (next === "Done" && task.recurrence !== "none") {
-      completeAndRepeatTask(task.id);
-    } else if (next === "Done") {
+    if (next === "Done") {
       updateTask(task.id, { status: "Done", ...(hasSubtasks ? {} : { progress: 100 }) });
     } else {
       updateTask(task.id, {
@@ -1242,8 +1237,7 @@ function SortableTaskCard({
   // the task Done; dropping back below reopens it so the bar tracks the field.
   const handleProgressChange = (next: number) => {
     if (next >= 100) {
-      if (task.recurrence !== "none") completeAndRepeatTask(task.id);
-      else updateTask(task.id, { progress: 100, status: "Done" });
+      updateTask(task.id, { progress: 100, status: "Done" });
     } else {
       updateTask(task.id, {
         progress: next,
@@ -1259,8 +1253,6 @@ function SortableTaskCard({
         status: "Working on it",
         ...(hasSubtasks ? {} : { progress: 0 }),
       });
-    } else if (task.recurrence !== "none") {
-      completeAndRepeatTask(task.id);
     } else {
       updateTask(task.id, {
         status: "Done",

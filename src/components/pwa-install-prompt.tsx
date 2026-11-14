@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Download, Share, X } from "lucide-react";
 
+import { usePrompt } from "@/lib/use-prompt";
+
 /**
  * The non-standard `beforeinstallprompt` event (Chromium only). Not in the DOM
  * lib types, so we model the slice we use.
@@ -90,10 +92,11 @@ export function PwaInstallPrompt() {
     setVisible(false);
   };
 
-  if (!visible) return null;
+  const showing = usePrompt("installPrompt", visible);
+  if (!showing) return null;
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:bottom-4">
+    <div data-prompt="installPrompt" className="fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] md:bottom-4">
       <div className="flex w-full max-w-md items-center gap-3 rounded-2xl border border-[var(--c-line)] bg-[var(--c-panel)] p-4 shadow-[0_8px_30px_rgba(74,64,54,0.18)]">
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[var(--c-beige-2)] text-[#a35d4d]">
           <Download className="size-5" />

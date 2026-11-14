@@ -5,11 +5,6 @@ import {
   addMonths,
   addWeeks,
   format,
-  getISOWeek,
-  getISOWeekYear,
-  getMonth,
-  getQuarter,
-  getYear,
   isValid,
   parseISO,
   startOfWeek,
@@ -35,6 +30,28 @@ import {
   refreshSession,
   type SyncOutcome,
 } from "./cloud-sync";
+import {
+  TIMER_DURATIONS,
+  TIMER_MODES,
+  initial as initialTimer,
+  isDue,
+  secondsLeft,
+  transition as timerTransition,
+  type TimerMode,
+  type TimerState,
+} from "@/lib/machines/timer";
+import {
+  initial as initialPrompts,
+  transition as promptTransition,
+  type PromptId,
+  type PromptQueue,
+} from "@/lib/machines/prompts";
+import {
+  MAX_TODAY_TASKS,
+  completeTask as asCompleted,
+  countActiveToday,
+  isDueToReopen,
+} from "@/lib/task-lifecycle";
 
 /* -------------------------------- demo mode ------------------------------- */
 
@@ -159,7 +176,7 @@ export interface Task {
    * dashboard's Balance widget and the colored pillar badges on cards.
    */
   lifePillar?: LifePillar;
-  /** Repeat interval driving completeAndRepeatTask. */
+  /** Repeat interval; see src/lib/task-lifecycle.ts for what finishing one means. */
   recurrence: Recurrence;
   /**
    * Calendar-period identifier of the period in which this recurring task was
@@ -663,41 +680,15 @@ export interface PendingSync {
 /*                          GTD "Today" capacity rule                         */
 /* -------------------------------------------------------------------------- */
 
-/**
- * The GTD capacity constraint: at most this many *active* (non-Done) tasks may
- * be promoted to the Dashboard's Daily Action list at once. Keeps the day's
- * commitments to a focused, finishable handful.
- */
-export const MAX_TODAY_TASKS = 5;
-
-/**
- * Count of active Daily Action tasks — workspace tasks (not Inbox) flagged
- * isToday that aren't yet Done. Completed today-tasks don't count against the
- * cap, so finishing one frees a slot.
- */
-export function countActiveTodayTasks(tasks: Task[]): number {
-  return tasks.reduce(
-    (count, task) =>
-      task.isToday && task.status !== "Done" && task.status !== "Inbox"
-        ? count + 1
-        : count,
-    0
-  );
-}
+// The Daily Action limit and its count live in src/lib/task-lifecycle.ts.
+export { MAX_TODAY_TASKS, countActiveToday as countActiveTodayTasks };
 
 /* -------------------------------------------------------------------------- */
 /*                               Pomodoro engine                              */
 /* -------------------------------------------------------------------------- */
 
-export const TIMER_MODES = ["focus", "shortBreak", "longBreak"] as const;
-export type TimerMode = (typeof TIMER_MODES)[number];
-
-/** Durations in seconds. Psychology-backed Pomodoro defaults. */
-export const TIMER_DURATIONS: Record<TimerMode, number> = {
-  focus: 25 * 60,
-  shortBreak: 5 * 60,
-  longBreak: 15 * 60,
-};
+// Modes, durations and the timer's states live in src/lib/machines/timer.ts.
+export { TIMER_DURATIONS, TIMER_MODES, type TimerMode };
 
 /** A long break is triggered after every N completed focus sessions. */
 export const SESSIONS_BEFORE_LONG_BREAK = 4;
@@ -786,12 +777,15 @@ interface ProdState {
   pendingSync: PendingSync | null;
 
   // Timer
-  mode: TimerMode;
-  timeLeft: number;
+  timer: TimerState;
+  /** The clock reading the countdown is shown against; TimerClock advances it. */
+  timerNow: number;
   sessionsCompleted: number;
-  isRunning: boolean;
   /** Monotonic counter bumped on every completed session — drives the chime. */
   completions: number;
+
+  /** Which self-opening dialog has the screen: src/lib/machines/prompts.ts. */
+  prompts: PromptQueue;
 
   // Board actions
   addTask: (
@@ -874,8 +868,10 @@ interface ProdState {
    * Completes a task. One-off tasks simply go Done; a recurring task is marked
    * Done and stamped with the current calendar period — it stays a SINGLE card
    * (no clones) and {@link refreshRecurringTasks} reopens it next period.
+   * `updateTask` with `status: "Done"` does the same, so no caller can skip
+   * the stamp.
    */
-  completeAndRepeatTask: (taskId: string) => void;
+  completeTask: (taskId: string) => void;
   /**
    * Reopens recurring tasks whose completion period has elapsed: a Done weekly
    * task becomes available again next calendar week, monthly next month, etc.
@@ -1032,8 +1028,12 @@ interface ProdState {
   pauseTimer: () => void;
   resetTimer: () => void;
   switchMode: (mode: TimerMode) => void;
-  tick: () => void;
-  completeSession: () => void;
+  tick: (now: number) => void;
+  completeIfDue: (now: number) => void;
+
+  // Prompt queue (components use the usePrompt hook, not these directly)
+  requestPrompt: (id: PromptId) => void;
+  releasePrompt: (id: PromptId) => void;
 }
 
 const initialTasks: Task[] = [
@@ -1255,30 +1255,6 @@ function advanceDeadlineToCurrentPeriod(
   return format(next, "yyyy-MM-dd");
 }
 
-/**
- * Calendar-period key for a recurring task: the identifier that stays constant
- * within one occurrence window and flips when the next window begins. This is
- * what drives "resets next week/month/quarter" — completion stamps the current
- * key, and {@link refreshRecurringTasks} reopens the task once the key changes.
- *   daily     -> "2026-06-14"   (the calendar day)
- *   weekly    -> "2026-W24"     (ISO week — Mon-anchored, year-correct at edges)
- *   monthly   -> "2026-06"      (calendar month)
- *   quarterly -> "2026-Q2"      (calendar quarter)
- */
-function periodKey(recurrence: Recurrence, date: Date): string {
-  switch (recurrence) {
-    case "daily":
-      return format(date, "yyyy-MM-dd");
-    case "weekly":
-      return `${getISOWeekYear(date)}-W${String(getISOWeek(date)).padStart(2, "0")}`;
-    case "monthly":
-      return `${getYear(date)}-${String(getMonth(date) + 1).padStart(2, "0")}`;
-    case "quarterly":
-      return `${getYear(date)}-Q${getQuarter(date)}`;
-    default:
-      return format(date, "yyyy-MM-dd");
-  }
-}
 
 /* -------------------------------------------------------------------------- */
 /*                          Debounced cloud pushes                            */
@@ -1489,11 +1465,11 @@ export const useProdStore = create<ProdState>()(
   unsyncedDeletedSubtaskIds: [],
   pendingSync: null,
 
-  mode: "focus",
-  timeLeft: TIMER_DURATIONS.focus,
+  timer: initialTimer,
+  timerNow: 0,
   sessionsCompleted: 0,
-  isRunning: false,
   completions: 0,
+  prompts: initialPrompts,
 
   addTask: (task) => {
     const newId = `task-${crypto.randomUUID()}`;
@@ -1531,9 +1507,13 @@ export const useProdStore = create<ProdState>()(
         ? taskPoints(updates.priority ?? existing.priority)
         : 0;
       return {
-        tasks: state.tasks.map((task) =>
-          task.id === id ? { ...task, ...updates } : task
-        ),
+        tasks: state.tasks.map((task) => {
+          if (task.id !== id) return task;
+          const next = { ...task, ...updates };
+          // Every route into Done gets the recurring stamp here, or the task
+          // would be reopened on the next refresh.
+          return becameDone ? asCompleted(next, new Date()) : next;
+        }),
         history: becameDone
           ? logTaskCompletion(
               state.history,
@@ -1553,7 +1533,7 @@ export const useProdStore = create<ProdState>()(
     if (!target || target.isToday) return true;
     // Enforce the capacity cap BEFORE mutating, so a blocked promotion leaves
     // state untouched and the caller can show the "capacity reached" toast.
-    if (countActiveTodayTasks(tasks) >= MAX_TODAY_TASKS) return false;
+    if (countActiveToday(tasks) >= MAX_TODAY_TASKS) return false;
     get().updateTask(id, { isToday: true });
     return true;
   },
@@ -1731,48 +1711,14 @@ export const useProdStore = create<ProdState>()(
       queueAllTasksPush(get);
     }
   },
-  completeAndRepeatTask: (taskId) => {
-    const target = get().tasks.find((t) => t.id === taskId);
-    if (!target) return;
-
-    // Only log a completion the first time it crosses into Done.
-    const becameDone = target.status !== "Done";
-    const points = taskPoints(target.priority);
-
-    // Recurring tasks stay a SINGLE card (no clones): mark Done and stamp the
-    // current calendar period. refreshRecurringTasks reopens it once the period
-    // rolls over. One-off tasks just go Done with no stamp.
-    const stamp =
-      target.recurrence !== "none"
-        ? periodKey(target.recurrence, new Date())
-        : undefined;
-
-    set((state) => ({
-      tasks: state.tasks.map((t) =>
-        t.id === taskId
-          ? {
-              ...t,
-              status: "Done" as TaskStatus,
-              ...(stamp ? { lastCompletedPeriod: stamp } : {}),
-            }
-          : t
-      ),
-      history: becameDone
-        ? logTaskCompletion(state.history, points, target.lifePillar)
-        : state.history,
-    }));
-    queueTaskPush(get, [taskId]);
-  },
+  completeTask: (taskId) => get().updateTask(taskId, { status: "Done" }),
   refreshRecurringTasks: () => {
     const now = new Date();
     const reopened: string[] = [];
     set((state) => {
       const tasks = state.tasks.map((task) => {
-        if (task.recurrence === "none" || task.status !== "Done") return task;
-        // Still inside the period it was completed in — keep it Done/hidden.
-        if (task.lastCompletedPeriod === periodKey(task.recurrence, now)) {
-          return task;
-        }
+        // One-off, not Done, or still inside the period it was completed in.
+        if (!isDueToReopen(task, now)) return task;
         // The period has elapsed: reopen a fresh occurrence in place.
         reopened.push(task.id);
         return {
@@ -1887,12 +1833,12 @@ export const useProdStore = create<ProdState>()(
       const t = get().tasks.find((task) => task.id === id);
       return t != null && t.status !== "Done";
     });
-    for (const id of ids) get().completeAndRepeatTask(id);
+    for (const id of ids) get().completeTask(id);
     pushDailyPlanIfCloud(get);
   },
   planCompleteTask: (taskId) => {
     // Reuse the unified completion path (handles recurring stamping too).
-    get().completeAndRepeatTask(taskId);
+    get().completeTask(taskId);
     set((state) => {
       if (!state.pendingReview) return {};
       const taskIds = state.pendingReview.taskIds.filter((id) => id !== taskId);
@@ -2643,43 +2589,49 @@ export const useProdStore = create<ProdState>()(
   },
 
   startTimer: () => {
-    // Guard: never run a depleted timer.
-    if (get().timeLeft <= 0) return;
-    set({ isRunning: true });
+    const now = Date.now();
+    set((state) => ({
+      timer: timerTransition(state.timer, { type: "start", now }),
+      timerNow: now,
+    }));
   },
 
-  pauseTimer: () => set({ isRunning: false }),
+  pauseTimer: () => {
+    const now = Date.now();
+    set((state) => ({
+      timer: timerTransition(state.timer, { type: "pause", now }),
+      timerNow: now,
+    }));
+  },
 
   resetTimer: () =>
+    set((state) => ({ timer: timerTransition(state.timer, { type: "reset" }) })),
+
+  switchMode: (mode) =>
     set((state) => ({
-      isRunning: false,
-      timeLeft: TIMER_DURATIONS[state.mode],
+      timer: timerTransition(state.timer, { type: "switch", mode }),
     })),
 
-  switchMode: (mode) => {
-    // Guard against an invalid mode being passed in.
-    if (!TIMER_MODES.includes(mode)) return;
-    set({
-      mode,
-      timeLeft: TIMER_DURATIONS[mode],
-      isRunning: false,
-    });
-  },
-
-  tick: () => {
-    const { timeLeft, isRunning } = get();
-    if (!isRunning) return;
-    if (timeLeft <= 1) {
-      get().completeSession();
+  tick: (now) => {
+    const { timer, timerNow } = get();
+    if (isDue(timer, now)) {
+      get().completeIfDue(now);
       return;
     }
-    set({ timeLeft: timeLeft - 1 });
+    // The clock beats faster than once a second; write only when the shown
+    // second changes.
+    if (secondsLeft(timer, now) !== secondsLeft(timer, timerNow)) {
+      set({ timerNow: now });
+    }
   },
 
-  completeSession: () => {
-    const creditedTaskId = get().mode === "focus" ? get().activeTaskId : null;
+  // Safe to call from any number of clocks: only a running, due session completes.
+  completeIfDue: (now) => {
+    if (!isDue(get().timer, now)) return;
+    const creditedTaskId =
+      get().timer.mode === "focus" ? get().activeTaskId : null;
     set((state) => {
-      const completedMode = state.mode;
+      const completedMode = state.timer.mode;
       const wasFocus = completedMode === "focus";
 
       const sessionsCompleted = wasFocus
@@ -2701,9 +2653,12 @@ export const useProdStore = create<ProdState>()(
       return {
         tasks,
         sessionsCompleted,
-        mode: nextMode,
-        timeLeft: TIMER_DURATIONS[nextMode],
-        isRunning: false,
+        timer: timerTransition(state.timer, {
+          type: "complete",
+          now,
+          nextMode,
+        }),
+        timerNow: now,
         completions: state.completions + 1,
         // A completed focus session counts toward today's consistency log.
         history: wasFocus
@@ -2714,6 +2669,16 @@ export const useProdStore = create<ProdState>()(
     // Persist the freshly credited pomodoro count for the focused task.
     if (creditedTaskId) queueTaskPush(get, [creditedTaskId]);
   },
+
+  requestPrompt: (id) =>
+    set((state) => ({
+      prompts: promptTransition(state.prompts, { type: "request", id }),
+    })),
+
+  releasePrompt: (id) =>
+    set((state) => ({
+      prompts: promptTransition(state.prompts, { type: "release", id }),
+    })),
     }),
     {
       name: IS_DEMO ? DEMO_STORAGE_KEY : "cadence-store",

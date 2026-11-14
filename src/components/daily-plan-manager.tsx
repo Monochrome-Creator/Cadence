@@ -6,6 +6,7 @@ import { format, isValid, parseISO } from "date-fns";
 import { CalendarClock, Check, X } from "lucide-react";
 
 import { useProdStore, type Task } from "@/store/use-prod-store";
+import { usePrompt } from "@/lib/use-prompt";
 import { cn } from "@/lib/utils";
 
 /**
@@ -74,6 +75,8 @@ function DailyReviewModal() {
       .filter((t): t is Task => t != null && t.status !== "Done");
   }, [pendingReview, tasks]);
 
+  const showing = usePrompt("missedPlan", pendingReview !== null && missed.length > 0);
+
   // `pendingReview` is null until the store hydrates on the client, so the
   // server render and first client render both produce null — no flash.
   if (!pendingReview) return null;
@@ -83,8 +86,10 @@ function DailyReviewModal() {
     return <SilentDismiss onDone={dismissReview} />;
   }
 
+  if (!showing) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(40,33,28,0.35)] p-4 backdrop-blur-sm sm:items-center">
+    <div data-prompt="missedPlan" className="fixed inset-0 z-50 flex items-end justify-center bg-[rgba(40,33,28,0.35)] p-4 backdrop-blur-sm sm:items-center">
       <div className="w-full max-w-md overflow-hidden rounded-3xl border border-[var(--c-line)] bg-[var(--c-panel)] shadow-[0_12px_40px_rgba(74,64,54,0.18)]">
         <div className="flex items-start gap-3 px-5 pt-5">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-[#f6e6da] text-[#a35d4d]">
