@@ -488,9 +488,7 @@ function MicroDeadlineField({
 }
 
 /**
- * Completion percent for a micro-task. Leaf rows (L3, or any row with no
- * children) get an editable 10%-step input; parent rows show a read-only,
- * auto-rolled-up average in a muted sage chip.
+ * Editable completion input or a read-only calculated percentage.
  */
 function PercentControl({
   percent,
@@ -512,8 +510,8 @@ function PercentControl({
   if (!editable) {
     return (
       <span
-        title="Auto-calculated from the average of its sub-tasks"
-        aria-label={`Rolled-up progress ${percent} percent`}
+        title="Calculated from completion"
+        aria-label={`Calculated progress ${percent} percent`}
         className="flex shrink-0 items-center rounded-md bg-[var(--c-beige-2)] px-2 py-1.5 text-xs font-semibold tabular-nums text-[#5f7d56] md:px-1.5 md:py-1 md:text-[11px]"
       >
         {percent}%
@@ -755,7 +753,7 @@ function SortableMicroTask({
           )}
         />
 
-        {/* Completion percent — editable on leaves, rolled-up on parents. */}
+        {/* Per-row completion and deadline. */}
         <span className="mt-0.5 flex shrink-0 items-center gap-1">
           <PercentControl
             percent={roll?.percent ?? 0}
@@ -871,7 +869,6 @@ function MicroTaskPanel({ task }: { task: Task }) {
     if (newId) setFocusId(newId);
   };
 
-  // Per-row completion: leaves keep their own percent; parents average children.
   const rollups = computeSubtaskRollups(task.subtasks);
 
   return (
@@ -1293,8 +1290,6 @@ function SortableTaskCard({
   const doneCount = task.subtasks.filter(
     (s) => s.status === "done" || s.status === "cancelled"
   ).length;
-  // Overall completion: Done → 100, else the flat average of every micro-task,
-  // else the manual %.
   const progress = effectiveTaskProgress(task);
   // Fraction badge: completed (or cancelled) micro-tasks over the total, so it
   // tracks the same per-step model as the progress bar.
@@ -1614,11 +1609,18 @@ function SortableTaskCard({
         </div>
       </div>
 
-      {/* Overall progress. With micro-tasks it's the read-only L1 roll-up; with
+      {/* Overall progress. With micro-tasks it's calculated from their completion; with
           none, the percentage field is manually editable (and hitting 100%
           completes the task). */}
       <div className="-mt-1 flex items-center gap-2 px-4 pb-3">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--c-beige)]">
+        <div
+          role="progressbar"
+          aria-label="Task progress"
+          aria-valuenow={progress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--c-beige)]"
+        >
           <div
             className="h-full rounded-full bg-[#6f9e6a] transition-[width] duration-300 ease-out"
             style={{ width: `${progress}%` }}

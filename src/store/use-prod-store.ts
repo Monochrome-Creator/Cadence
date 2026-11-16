@@ -61,6 +61,8 @@ import {
   isDueToReopen,
 } from "@/lib/task-lifecycle";
 
+import { milestoneWeights } from "@/lib/milestone-progress";
+
 /* -------------------------------- demo mode ------------------------------- */
 
 /**
@@ -146,9 +148,8 @@ export interface Subtask {
   status: SubtaskStatus;
   level: SubtaskLevel;
   /**
-   * Completion percent (0–100) for a leaf micro-task. Parent rows ignore this
-   * stored value and show an average of their children instead (see
-   * computeSubtaskRollups). Undefined on rows created before this field.
+   * Manual completion of an ordinary open micro-task, from 0 to 100.
+   * Weighted milestones earn their share when checked.
    */
   percent?: number;
   /** Optional per-micro-task due date as a yyyy-MM-dd string. */
@@ -200,7 +201,7 @@ export interface Task {
   /**
    * Manually-set completion percent (0–100). Only consulted when the task has
    * NO micro-tasks — once children exist, progress is the read-only roll-up of
-   * their averaged completion (see effectiveTaskProgress). Undefined on tasks
+   * their completion (see effectiveTaskProgress). Undefined on tasks
    * created before this field, treated as 0.
    */
   progress?: number;
@@ -242,9 +243,9 @@ export function clampPercent(value: number): number {
 }
 
 export interface SubtaskRollup {
-  /** Completion 0–100: own value for leaves, averaged for parents. */
+  /** Completion of this row, from 0 to 100. */
   percent: number;
-  /** True for leaf rows (no deeper children) — the only directly editable ones. */
+  /** Whether the row accepts manual percentage edits. */
   editable: boolean;
 }
 
@@ -275,6 +276,12 @@ function leafPercent(subtask: Subtask): number {
 export function computeSubtaskRollups(
   subtasks: Subtask[]
 ): Record<string, SubtaskRollup> {
+  if (milestoneWeights(subtasks)) {
+    return Object.fromEntries(subtasks.map(step => [
+      step.id,
+      { percent: step.status === "done" ? 100 : 0, editable: false },
+    ]));
+  }
   const n = subtasks.length;
   const level = subtasks.map((s) => SUBTASK_LEVEL_NUM[s.level]);
 
@@ -296,16 +303,44 @@ export function computeSubtaskRollups(
   return out;
 }
 
-/**
- * Overall task completion: the average of every micro-task's own percent, so
- * each L1/L2/L3 counts equally. Completing a single deep micro-task therefore
- * nudges the bar by one unit instead of jumping the whole task to 100%. Returns
- * 0 when the task has no micro-tasks.
- */
+/** Weighted milestones earn their share on completion. Other checklists use mean progress. */
 export function computeTaskProgress(subtasks: Subtask[]): number {
   if (subtasks.length === 0) return 0;
+  const weights = milestoneWeights(subtasks);
+  if (weights) {
+    return subtasks.reduce((sum, step, i) => sum + (step.status === "done" ? weights[i] : 0), 0);
+  }
   const total = subtasks.reduce((sum, s) => sum + leafPercent(s), 0);
   return Math.round(total / subtasks.length);
+}
+
+function toggleSubtaskStatus(
+  tasks: Task[],
+  taskId: string,
+  subtaskId: string,
+  status: "done" | "cancelled",
+): Task[] {
+  return tasks.map(task => {
+    if (task.id !== taskId) return task;
+    const steps = task.subtasks;
+    const index = steps.findIndex(step => step.id === subtaskId);
+    if (index < 0) return task;
+
+    const nextStatus = steps[index].status === status ? "todo" : status;
+    let end = index + 1;
+    // Each weighted milestone is checked individually. Ordinary outline rows
+    // keep the existing behaviour of toggling their whole descendant block.
+    if (!milestoneWeights(steps)) {
+      const depth = SUBTASK_LEVEL_NUM[steps[index].level];
+      while (end < steps.length && SUBTASK_LEVEL_NUM[steps[end].level] > depth) end++;
+    }
+    return {
+      ...task,
+      subtasks: steps.map((step, i) =>
+        i >= index && i < end ? { ...step, status: nextStatus } : step
+      ),
+    };
+  });
 }
 
 /**
@@ -930,10 +965,7 @@ interface ProdState {
     overId: string
   ) => void;
   /**
-   * Toggles a micro-task's done state via its checkbox and cascades the new
-   * state to its entire descendant block. Checking a parent (L1/L2) therefore
-   * force-completes everything beneath it, driving its averaged roll-up to
-   * 100%; unchecking reopens the whole branch.
+   * Toggle a milestone individually or a regular outline row with its descendants.
    */
   toggleSubtaskComplete: (taskId: string, subtaskId: string) => void;
   /**
@@ -2108,61 +2140,13 @@ export const useProdStore = create<ProdState>()(
   },
   toggleSubtaskComplete: (taskId, subtaskId) => {
     set((state) => ({
-      tasks: state.tasks.map((task) => {
-        if (task.id !== taskId) return task;
-        const index = task.subtasks.findIndex((s) => s.id === subtaskId);
-        if (index === -1) return task;
-        // Flip the row, then apply the same state to its descendant block (the
-        // contiguous deeper rows) so a parent checkbox completes its children.
-        const nextStatus: SubtaskStatus =
-          task.subtasks[index].status === "done" ? "todo" : "done";
-        const targetLevel = SUBTASK_LEVEL_NUM[task.subtasks[index].level];
-        let end = index + 1;
-        while (
-          end < task.subtasks.length &&
-          SUBTASK_LEVEL_NUM[task.subtasks[end].level] > targetLevel
-        ) {
-          end += 1;
-        }
-        // Roll-up only: completing micro-tasks never auto-completes the parent
-        // task — the user marks the card Done themselves once L1/L2/L3 are done.
-        return {
-          ...task,
-          subtasks: task.subtasks.map((s, i) =>
-            i >= index && i < end ? { ...s, status: nextStatus } : s
-          ),
-        };
-      }),
+      tasks: toggleSubtaskStatus(state.tasks, taskId, subtaskId, "done"),
     }));
     queueTaskPush(get, [taskId]);
   },
   toggleSubtaskCancelled: (taskId, subtaskId) => {
     set((state) => ({
-      tasks: state.tasks.map((task) => {
-        if (task.id !== taskId) return task;
-        const index = task.subtasks.findIndex((s) => s.id === subtaskId);
-        if (index === -1) return task;
-        // Cross out the row, then apply the same state to its descendant block so
-        // cancelling a parent crosses out everything beneath it.
-        const nextStatus: SubtaskStatus =
-          task.subtasks[index].status === "cancelled" ? "todo" : "cancelled";
-        const targetLevel = SUBTASK_LEVEL_NUM[task.subtasks[index].level];
-        let end = index + 1;
-        while (
-          end < task.subtasks.length &&
-          SUBTASK_LEVEL_NUM[task.subtasks[end].level] > targetLevel
-        ) {
-          end += 1;
-        }
-        // Roll-up only: cancelling micro-tasks never auto-completes the parent
-        // task — completion stays an explicit action on the card.
-        return {
-          ...task,
-          subtasks: task.subtasks.map((s, i) =>
-            i >= index && i < end ? { ...s, status: nextStatus } : s
-          ),
-        };
-      }),
+      tasks: toggleSubtaskStatus(state.tasks, taskId, subtaskId, "cancelled"),
     }));
     queueTaskPush(get, [taskId]);
   },
